@@ -1,0 +1,100 @@
+CREATE TABLE "commission_logs" (
+	"id" text PRIMARY KEY NOT NULL,
+	"date" text NOT NULL,
+	"customer_name" text NOT NULL,
+	"item_type" text NOT NULL,
+	"item_id" text,
+	"item_name" text NOT NULL,
+	"customer_type" text NOT NULL,
+	"selling_price" integer DEFAULT 0 NOT NULL,
+	"quantity" integer DEFAULT 1 NOT NULL,
+	"staff_name" text DEFAULT '' NOT NULL,
+	"staff_role" text DEFAULT 'admin' NOT NULL,
+	"commission_amount" integer DEFAULT 0 NOT NULL,
+	"total_sales" integer DEFAULT 0 NOT NULL,
+	"total_hpp" integer DEFAULT 0 NOT NULL,
+	"net_profit" integer DEFAULT 0 NOT NULL,
+	"payment_status" text DEFAULT 'unpaid' NOT NULL,
+	"notes" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "fixed_cost_settings" (
+	"id" text PRIMARY KEY NOT NULL,
+	"electricity_monthly" integer DEFAULT 0 NOT NULL,
+	"water_monthly" integer DEFAULT 0 NOT NULL,
+	"internet_monthly" integer DEFAULT 0 NOT NULL,
+	"rent_monthly" integer DEFAULT 0 NOT NULL,
+	"doctor_salary" integer DEFAULT 0 NOT NULL,
+	"therapist_salary" integer DEFAULT 0 NOT NULL,
+	"beautician_salary" integer DEFAULT 0 NOT NULL,
+	"admin_salary" integer DEFAULT 0 NOT NULL,
+	"bpjs_allowance" integer DEFAULT 0 NOT NULL,
+	"cleaning_laundry" integer DEFAULT 0 NOT NULL,
+	"machine_maintenance" integer DEFAULT 0 NOT NULL,
+	"marketing" integer DEFAULT 0 NOT NULL,
+	"software_subscription" integer DEFAULT 0 NOT NULL,
+	"equipment_installment" integer DEFAULT 0 NOT NULL,
+	"renovation_installment" integer DEFAULT 0 NOT NULL,
+	"other_installment" integer DEFAULT 0 NOT NULL,
+	"other_fixed_cost" integer DEFAULT 0 NOT NULL,
+	"working_days_per_month" integer DEFAULT 26 NOT NULL,
+	"operating_hours_per_day" integer DEFAULT 9 NOT NULL,
+	"average_customers_per_month" integer DEFAULT 1 NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "products" (
+	"id" text PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"category" text DEFAULT '' NOT NULL,
+	"supplier" text DEFAULT '' NOT NULL,
+	"buying_tiers" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"normal_price" integer DEFAULT 0 NOT NULL,
+	"vip_price" integer DEFAULT 0 NOT NULL,
+	"promo_price" integer DEFAULT 0 NOT NULL,
+	"stock_quantity" integer,
+	"commission_rules" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "simulation_records" (
+	"id" text PRIMARY KEY NOT NULL,
+	"item_type" text NOT NULL,
+	"item_id" text NOT NULL,
+	"item_name" text NOT NULL,
+	"customer_type" text NOT NULL,
+	"selling_price" integer DEFAULT 0 NOT NULL,
+	"quantity" integer DEFAULT 1 NOT NULL,
+	"direct_hpp" integer DEFAULT 0 NOT NULL,
+	"overhead_cost" integer DEFAULT 0 NOT NULL,
+	"total_cost" integer DEFAULT 0 NOT NULL,
+	"gross_profit" integer DEFAULT 0 NOT NULL,
+	"total_commission" integer DEFAULT 0 NOT NULL,
+	"net_profit" integer DEFAULT 0 NOT NULL,
+	"margin_percent" integer DEFAULT 0 NOT NULL,
+	"commission_breakdown" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"notes" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "treatments" (
+	"id" text PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"category" text DEFAULT '' NOT NULL,
+	"duration_minutes" integer DEFAULT 0 NOT NULL,
+	"default_non_vip_price" integer DEFAULT 0 NOT NULL,
+	"default_vip_price" integer DEFAULT 0 NOT NULL,
+	"promo_price" integer DEFAULT 0 NOT NULL,
+	"target_margin_percent" integer DEFAULT 40 NOT NULL,
+	"staff_involved" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"disposable_items" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"material_items" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"machine_items" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"commission_rules" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
