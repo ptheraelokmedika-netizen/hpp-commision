@@ -3,6 +3,36 @@ export type CustomerType = "Normal" | "Non VIP" | "VIP" | "Promo";
 export type CommissionAppliesTo = "Normal" | "Non VIP" | "VIP" | "Promo" | "All";
 export type CommissionType = "fixed" | "sellingPercentage" | "grossProfitPercentage" | "netBeforeCommissionPercentage" | "profitPercentage";
 export type PaymentStatus = "Belum dibayar" | "Sudah dibayar";
+export type ConsumableCategory =
+  | "Disposable"
+  | "Skincare / Serum"
+  | "Cairan / Liquid"
+  | "Alat habis pakai"
+  | "Obat / Injectable support"
+  | "Other";
+export type ConsumableUnit =
+  | "pcs"
+  | "lembar"
+  | "ml"
+  | "gram"
+  | "tube"
+  | "bottle"
+  | "box"
+  | "pack"
+  | "vial"
+  | "ampoule"
+  | "syringe"
+  | "cartridge"
+  | "drop"
+  | "pump"
+  | "other";
+export type HppPackageCategory =
+  | "Facial"
+  | "Injection"
+  | "Laser / Energy Based Device"
+  | "Meso / Booster"
+  | "Body Treatment"
+  | "Other";
 
 export type FixedCostSettings = {
   listrik: number;
@@ -47,6 +77,58 @@ export type TreatmentMachineItem = {
   notes?: string;
 };
 
+export type TreatmentConsumableUsage = {
+  id: string;
+  consumableId: string;
+  name: string;
+  quantityUsed: number;
+  unit: ConsumableUnit;
+  costPerUnit: number;
+  sourcePackageName?: string;
+  notes?: string;
+};
+
+export type HppPackageItem = {
+  id: string;
+  mode: "master" | "manual";
+  consumableItemId?: string;
+  consumableName: string;
+  qtyDefault: number;
+  unit: ConsumableUnit;
+  costPerUnit: number;
+  totalCost: number;
+  manualName?: string;
+  manualCost?: number;
+  sourcePackageName?: string;
+  notes?: string;
+};
+
+export type HppPackageTemplate = {
+  id: string;
+  name: string;
+  category: HppPackageCategory;
+  description?: string;
+  items: HppPackageItem[];
+  totalCost: number;
+  updatedAt?: string;
+};
+
+export type ConsumableItem = {
+  id: string;
+  name: string;
+  category: ConsumableCategory;
+  supplier?: string;
+  purchasePrice: number;
+  purchaseQuantity: number;
+  purchaseUnit: ConsumableUnit;
+  totalSmallestUnit: number;
+  smallestUnit: ConsumableUnit;
+  costPerSmallestUnit: number;
+  availableQuantity: number;
+  minimumStock: number;
+  notes?: string;
+};
+
 export type CommissionRule = {
   id: string;
   role: StaffRole;
@@ -66,6 +148,7 @@ export type Treatment = {
   durationMinutes: number;
   disposableCosts: TreatmentCostItem[];
   disposableItems?: TreatmentCostItem[];
+  consumableUsages?: TreatmentConsumableUsage[];
   materialItems: TreatmentMaterialItem[];
   machineItems: TreatmentMachineItem[];
   productMaterialCost: number;
@@ -146,4 +229,6 @@ export type StorageSchema = {
   products: Product[];
   simulations: SimulationRecord[];
   commissionLogs: CommissionLog[];
+  consumables: ConsumableItem[];
+  hppPackages: HppPackageTemplate[];
 };

@@ -1,4 +1,4 @@
-import { sampleCommissionLogs, sampleFixedCosts, sampleProducts, sampleSimulations, sampleTreatments } from "./sample-data";
+import { sampleCommissionLogs, sampleConsumables, sampleFixedCosts, sampleHppPackages, sampleProducts, sampleSimulations, sampleTreatments } from "./sample-data";
 import type { StorageSchema } from "./types";
 
 const STORAGE_KEY = "hera-clinic-hpp-commission";
@@ -9,6 +9,39 @@ export const initialData: StorageSchema = {
   products: sampleProducts,
   simulations: sampleSimulations,
   commissionLogs: sampleCommissionLogs,
+  consumables: sampleConsumables,
+  hppPackages: sampleHppPackages,
+};
+
+export const emptyData: StorageSchema = {
+  fixedCosts: {
+    listrik: 0,
+    air: 0,
+    internetTelepon: 0,
+    sewaTempat: 0,
+    gajiDokter: 0,
+    gajiTherapist: 0,
+    gajiBeautician: 0,
+    gajiAdmin: 0,
+    bpjsTunjangan: 0,
+    cleaningLaundry: 0,
+    maintenanceAlat: 0,
+    marketing: 0,
+    softwareSubscription: 0,
+    cicilanAlat: 0,
+    cicilanRenovasi: 0,
+    cicilanLain: 0,
+    biayaTetapLain: 0,
+    workingDays: 0,
+    operatingHours: 0,
+    averageCustomers: 0,
+  },
+  treatments: [],
+  products: [],
+  simulations: [],
+  commissionLogs: [],
+  consumables: [],
+  hppPackages: [],
 };
 
 export function generateId(prefix = "id") {
@@ -38,6 +71,7 @@ function normalizeData(data: StorageSchema): StorageSchema {
     treatments: data.treatments.map((treatment) => ({
       ...treatment,
       disposableItems: treatment.disposableItems ?? treatment.disposableCosts ?? [],
+      consumableUsages: treatment.consumableUsages ?? [],
       materialItems: treatment.materialItems ?? [],
       machineItems: treatment.machineItems ?? [],
       staffInvolved: treatment.staffInvolved ?? [],
@@ -64,6 +98,20 @@ function normalizeData(data: StorageSchema): StorageSchema {
           appliesTo: normalizedRule.appliesTo ?? "All",
         };
       }),
+    })),
+    consumables: (data.consumables ?? []).map((item) => ({
+      ...item,
+      purchaseQuantity: item.purchaseQuantity ?? 1,
+      costPerSmallestUnit:
+        item.costPerSmallestUnit ?? (item.totalSmallestUnit > 0 ? item.purchasePrice / item.totalSmallestUnit : 0),
+      availableQuantity:
+        item.availableQuantity ?? (item.purchaseQuantity ?? 1) * (item.totalSmallestUnit ?? 0),
+      minimumStock: item.minimumStock ?? 0,
+    })),
+    hppPackages: (data.hppPackages ?? []).map((item) => ({
+      ...item,
+      items: item.items ?? [],
+      totalCost: item.totalCost ?? (item.items ?? []).reduce((sum, row) => sum + row.totalCost, 0),
     })),
   };
 }
@@ -95,4 +143,9 @@ export function deleteData<K extends "treatments" | "products" | "simulations" |
 export function resetData(): StorageSchema {
   saveData(initialData);
   return initialData;
+}
+
+export function clearData(): StorageSchema {
+  saveData(emptyData);
+  return emptyData;
 }

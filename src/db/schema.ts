@@ -37,6 +37,7 @@ export const treatments = pgTable("treatments", {
   targetMarginPercent: integer("target_margin_percent").notNull().default(40),
   staffInvolved: jsonb("staff_involved").notNull().default([]),
   disposableItems: jsonb("disposable_items").notNull().default([]),
+  consumableUsages: jsonb("consumable_usages").notNull().default([]),
   materialItems: jsonb("material_items").notNull().default([]),
   machineItems: jsonb("machine_items").notNull().default([]),
   commissionRules: jsonb("commission_rules").notNull().default([]),
@@ -97,6 +98,35 @@ export const commissionLogs = pgTable("commission_logs", {
   netProfit: integer("net_profit").notNull().default(0),
   paymentStatus: text("payment_status").notNull().default("unpaid"),
   notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const consumableItems = pgTable("consumable_items", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  category: text("category").notNull().default("Other"),
+  supplier: text("supplier"),
+  purchasePrice: integer("purchase_price").notNull().default(0),
+  purchaseQuantity: integer("purchase_quantity").notNull().default(1),
+  purchaseUnit: text("purchase_unit").notNull().default("pack"),
+  totalSmallestUnit: integer("total_smallest_unit").notNull().default(0),
+  smallestUnit: text("smallest_unit").notNull().default("pcs"),
+  costPerSmallestUnit: integer("cost_per_smallest_unit").notNull().default(0),
+  availableQuantity: integer("available_quantity").notNull().default(0),
+  minimumStock: integer("minimum_stock").notNull().default(0),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const hppPackageTemplates = pgTable("hpp_package_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  category: text("category").notNull().default("Other"),
+  description: text("description"),
+  items: jsonb("items").notNull().default([]),
+  totalCost: integer("total_cost").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

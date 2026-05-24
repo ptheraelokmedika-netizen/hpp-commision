@@ -1,8 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
-import { initialData } from "../../lib/storage";
-import type { CommissionLog, FixedCostSettings, Product, SimulationRecord, StorageSchema, Treatment } from "../../lib/types";
+import { emptyData, initialData } from "../../lib/storage";
+import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, StorageSchema, Treatment } from "../../lib/types";
 import { getDb } from "./index";
-import { commissionLogs, fixedCostSettings, products, simulationRecords, treatments } from "./schema";
+import { commissionLogs, consumableItems, fixedCostSettings, hppPackageTemplates, products, simulationRecords, treatments } from "./schema";
 
 const SETTINGS_ID = "hera-clinic-default";
 
@@ -71,6 +71,7 @@ function treatmentToDb(treatment: Treatment) {
     targetMarginPercent: treatment.targetMarginPercent,
     staffInvolved: treatment.staffInvolved,
     disposableItems,
+    consumableUsages: treatment.consumableUsages ?? [],
     materialItems: treatment.materialItems ?? [],
     machineItems: treatment.machineItems ?? [],
     commissionRules: treatment.commissionRules ?? [],
@@ -87,6 +88,7 @@ function treatmentFromDb(row: typeof treatments.$inferSelect): Treatment {
     durationMinutes: row.durationMinutes,
     disposableCosts: disposableItems ?? [],
     disposableItems: disposableItems ?? [],
+    consumableUsages: (row.consumableUsages as Treatment["consumableUsages"]) ?? [],
     materialItems: (row.materialItems as Treatment["materialItems"]) ?? [],
     machineItems: (row.machineItems as Treatment["machineItems"]) ?? [],
     productMaterialCost: 0,
@@ -97,6 +99,70 @@ function treatmentFromDb(row: typeof treatments.$inferSelect): Treatment {
     promoPrice: row.promoPrice,
     targetMarginPercent: row.targetMarginPercent,
     commissionRules: (row.commissionRules as Treatment["commissionRules"]) ?? [],
+  };
+}
+
+function consumableToDb(item: ConsumableItem) {
+  const costPerSmallestUnit = item.totalSmallestUnit > 0 ? Math.round(item.purchasePrice / item.totalSmallestUnit) : 0;
+  const availableQuantity = item.availableQuantity ?? item.purchaseQuantity * item.totalSmallestUnit;
+  return {
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    supplier: item.supplier ?? null,
+    purchasePrice: Math.round(item.purchasePrice),
+    purchaseQuantity: Math.round(item.purchaseQuantity || 1),
+    purchaseUnit: item.purchaseUnit,
+    totalSmallestUnit: Math.round(item.totalSmallestUnit),
+    smallestUnit: item.smallestUnit,
+    costPerSmallestUnit,
+    availableQuantity: Math.round(availableQuantity),
+    minimumStock: Math.round(item.minimumStock || 0),
+    notes: item.notes ?? null,
+    updatedAt: new Date(),
+  };
+}
+
+function consumableFromDb(row: typeof consumableItems.$inferSelect): ConsumableItem {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category as ConsumableItem["category"],
+    supplier: row.supplier ?? undefined,
+    purchasePrice: row.purchasePrice,
+    purchaseQuantity: row.purchaseQuantity,
+    purchaseUnit: row.purchaseUnit as ConsumableItem["purchaseUnit"],
+    totalSmallestUnit: row.totalSmallestUnit,
+    smallestUnit: row.smallestUnit as ConsumableItem["smallestUnit"],
+    costPerSmallestUnit: row.costPerSmallestUnit,
+    availableQuantity: row.availableQuantity,
+    minimumStock: row.minimumStock,
+    notes: row.notes ?? undefined,
+  };
+}
+
+function hppPackageToDb(item: HppPackageTemplate) {
+  const totalCost = item.items.reduce((sum, row) => sum + row.totalCost, 0);
+  return {
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    description: item.description ?? null,
+    items: item.items,
+    totalCost: Math.round(totalCost),
+    updatedAt: new Date(),
+  };
+}
+
+function hppPackageFromDb(row: typeof hppPackageTemplates.$inferSelect): HppPackageTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category as HppPackageTemplate["category"],
+    description: row.description ?? undefined,
+    items: (row.items as HppPackageTemplate["items"]) ?? [],
+    totalCost: row.totalCost,
+    updatedAt: row.updatedAt.toISOString().slice(0, 10),
   };
 }
 
@@ -231,12 +297,14 @@ function logFromDb(row: typeof commissionLogs.$inferSelect): CommissionLog {
 
 export async function getAppData(): Promise<StorageSchema> {
   const db = getDb();
-  const [settingsRows, treatmentRows, productRows, simulationRows, logRows] = await Promise.all([
+  const [settingsRows, treatmentRows, productRows, simulationRows, logRows, consumableRows, hppPackageRows] = await Promise.all([
     db.select().from(fixedCostSettings),
     db.select().from(treatments),
     db.select().from(products),
     db.select().from(simulationRecords),
     db.select().from(commissionLogs),
+    db.select().from(consumableItems),
+    db.select().from(hppPackageTemplates),
   ]);
 
   return {
@@ -245,6 +313,8 @@ export async function getAppData(): Promise<StorageSchema> {
     products: productRows.map(productFromDb),
     simulations: simulationRows.map(simulationFromDb),
     commissionLogs: logRows.map(logFromDb),
+    consumables: consumableRows.map(consumableFromDb),
+    hppPackages: hppPackageRows.map(hppPackageFromDb),
   };
 }
 
@@ -255,12 +325,20 @@ export async function replaceAppData(data: StorageSchema) {
   await db.delete(products);
   await db.delete(simulationRecords);
   await db.delete(commissionLogs);
+  await db.delete(consumableItems);
+  await db.delete(hppPackageTemplates);
 
   await db.insert(fixedCostSettings).values(settingsToDb(data.fixedCosts));
   if (data.treatments.length) await db.insert(treatments).values(data.treatments.map(treatmentToDb));
   if (data.products.length) await db.insert(products).values(data.products.map(productToDb));
   if (data.simulations.length) await db.insert(simulationRecords).values(data.simulations.map(simulationToDb));
   if (data.commissionLogs.length) await db.insert(commissionLogs).values(data.commissionLogs.map(logToDb));
+  if (data.consumables.length) await db.insert(consumableItems).values(data.consumables.map(consumableToDb));
+  if (data.hppPackages.length) await db.insert(hppPackageTemplates).values(data.hppPackages.map(hppPackageToDb));
+}
+
+export async function clearDatabase() {
+  await replaceAppData(emptyData);
 }
 
 export async function updateSettings(settings: FixedCostSettings) {
@@ -304,6 +382,39 @@ export async function upsertCommissionLog(log: CommissionLog) {
 
 export async function deleteCommissionLog(id: string) {
   await getDb().delete(commissionLogs).where(eq(commissionLogs.id, id));
+}
+
+export async function upsertConsumable(item: ConsumableItem) {
+  const db = getDb();
+  await db
+    .insert(consumableItems)
+    .values(consumableToDb(item))
+    .onConflictDoUpdate({ target: consumableItems.id, set: consumableToDb(item) });
+}
+
+export async function deleteConsumable(id: string) {
+  await getDb().delete(consumableItems).where(eq(consumableItems.id, id));
+}
+
+export async function upsertHppPackage(item: HppPackageTemplate) {
+  const db = getDb();
+  await db
+    .insert(hppPackageTemplates)
+    .values(hppPackageToDb(item))
+    .onConflictDoUpdate({ target: hppPackageTemplates.id, set: hppPackageToDb(item) });
+}
+
+export async function deleteHppPackage(id: string) {
+  await getDb().delete(hppPackageTemplates).where(eq(hppPackageTemplates.id, id));
+}
+
+export async function deductConsumables(usages: { consumableId: string; quantity: number }[]) {
+  const data = await getAppData();
+  const nextConsumables = data.consumables.map((item) => {
+    const used = usages.filter((usage) => usage.consumableId === item.id).reduce((sum, usage) => sum + usage.quantity, 0);
+    return used > 0 ? { ...item, availableQuantity: Math.max(0, item.availableQuantity - used) } : item;
+  });
+  await Promise.all(nextConsumables.map(upsertConsumable));
 }
 
 export async function markCommissionLogsPaid(ids: string[]) {

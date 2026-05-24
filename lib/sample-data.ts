@@ -1,4 +1,4 @@
-import type { CommissionLog, FixedCostSettings, Product, SimulationRecord, Treatment } from "./types";
+import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, Treatment } from "./types";
 
 export const sampleFixedCosts: FixedCostSettings = {
   listrik: 4500000,
@@ -222,3 +222,112 @@ export const sampleCommissionLogs: CommissionLog[] = [
 ];
 
 export const sampleSimulations: SimulationRecord[] = [];
+
+export const sampleConsumables: ConsumableItem[] = [
+  {
+    id: "cons-kapas",
+    name: "Kapas",
+    category: "Disposable",
+    supplier: "Hera Medical Supply",
+    purchasePrice: 50000,
+    purchaseQuantity: 1,
+    purchaseUnit: "pack",
+    totalSmallestUnit: 500,
+    smallestUnit: "lembar",
+    costPerSmallestUnit: 100,
+    availableQuantity: 500,
+    minimumStock: 100,
+    notes: "1 pack isi 500 lembar",
+  },
+  {
+    id: "cons-sabun-wajah",
+    name: "Sabun wajah",
+    category: "Cairan / Liquid",
+    supplier: "Derma Prime",
+    purchasePrice: 250000,
+    purchaseQuantity: 1,
+    purchaseUnit: "bottle",
+    totalSmallestUnit: 1000,
+    smallestUnit: "ml",
+    costPerSmallestUnit: 250,
+    availableQuantity: 1000,
+    minimumStock: 200,
+    notes: "1 liter = 1000 ml",
+  },
+  {
+    id: "cons-alkohol-swab",
+    name: "Alkohol swab",
+    category: "Disposable",
+    supplier: "Medika Sterile",
+    purchasePrice: 80000,
+    purchaseQuantity: 1,
+    purchaseUnit: "box",
+    totalSmallestUnit: 100,
+    smallestUnit: "pcs",
+    costPerSmallestUnit: 800,
+    availableQuantity: 100,
+    minimumStock: 20,
+  },
+  {
+    id: "cons-gel-ultrasound",
+    name: "Gel ultrasound",
+    category: "Cairan / Liquid",
+    supplier: "Beauty Device Care",
+    purchasePrice: 120000,
+    purchaseQuantity: 1,
+    purchaseUnit: "bottle",
+    totalSmallestUnit: 500,
+    smallestUnit: "ml",
+    costPerSmallestUnit: 240,
+    availableQuantity: 500,
+    minimumStock: 120,
+  },
+];
+
+export const sampleHppPackages: HppPackageTemplate[] = [
+  {
+    id: "pkg-basic-facial",
+    name: "Basic Facial Set",
+    category: "Facial",
+    description: "Set bahan standar untuk facial dasar.",
+    totalCost: 4650,
+    updatedAt: "2026-05-24",
+    items: [
+      { id: "pkgbf-1", mode: "master", consumableItemId: "cons-sabun-wajah", consumableName: "Sabun wajah", qtyDefault: 5, unit: "ml", costPerUnit: 250, totalCost: 1250 },
+      { id: "pkgbf-2", mode: "manual", consumableName: "Sponge", manualName: "Sponge", qtyDefault: 2, unit: "pcs", costPerUnit: 1000, manualCost: 2000, totalCost: 2000 },
+      { id: "pkgbf-3", mode: "manual", consumableName: "Toner", manualName: "Toner", qtyDefault: 3, unit: "ml", costPerUnit: 300, manualCost: 900, totalCost: 900 },
+      { id: "pkgbf-4", mode: "master", consumableItemId: "cons-kapas", consumableName: "Kapas", qtyDefault: 5, unit: "lembar", costPerUnit: 100, totalCost: 500 },
+    ],
+  },
+  {
+    id: "pkg-meso-default",
+    name: "Meso Default Set",
+    category: "Meso / Booster",
+    description: "Needle, syringe, antiseptik, gauze, numbing, dan booster.",
+    totalCost: 104600,
+    updatedAt: "2026-05-24",
+    items: [
+      { id: "pkgm-1", mode: "manual", consumableName: "Needle", manualName: "Needle", qtyDefault: 1, unit: "pcs", costPerUnit: 12000, manualCost: 12000, totalCost: 12000 },
+      { id: "pkgm-2", mode: "manual", consumableName: "Syringe", manualName: "Syringe", qtyDefault: 1, unit: "syringe", costPerUnit: 15000, manualCost: 15000, totalCost: 15000 },
+      { id: "pkgm-3", mode: "master", consumableItemId: "cons-alkohol-swab", consumableName: "Alkohol swab", qtyDefault: 2, unit: "pcs", costPerUnit: 800, totalCost: 1600 },
+      { id: "pkgm-4", mode: "manual", consumableName: "Gauze", manualName: "Gauze", qtyDefault: 2, unit: "pcs", costPerUnit: 3000, manualCost: 6000, totalCost: 6000 },
+      { id: "pkgm-5", mode: "manual", consumableName: "Numbing cream", manualName: "Numbing cream", qtyDefault: 2, unit: "gram", costPerUnit: 10000, manualCost: 20000, totalCost: 20000 },
+      { id: "pkgm-6", mode: "manual", consumableName: "Serum meso / booster", manualName: "Serum meso / booster", qtyDefault: 1, unit: "vial", costPerUnit: 50000, manualCost: 50000, totalCost: 50000 },
+    ],
+  },
+  {
+    id: "pkg-laser-prep",
+    name: "Laser Preparation Set",
+    category: "Laser / Energy Based Device",
+    description: "Persiapan kulit sebelum laser atau EBD.",
+    totalCost: 4420,
+    updatedAt: "2026-05-24",
+    items: [
+      { id: "pkgl-1", mode: "master", consumableItemId: "cons-sabun-wajah", consumableName: "Sabun wajah", qtyDefault: 4, unit: "ml", costPerUnit: 250, totalCost: 1000 },
+      { id: "pkgl-2", mode: "master", consumableItemId: "cons-kapas", consumableName: "Kapas", qtyDefault: 6, unit: "lembar", costPerUnit: 100, totalCost: 600 },
+      { id: "pkgl-3", mode: "master", consumableItemId: "cons-alkohol-swab", consumableName: "Alkohol swab", qtyDefault: 1, unit: "pcs", costPerUnit: 800, totalCost: 800 },
+      { id: "pkgl-4", mode: "master", consumableItemId: "cons-gel-ultrasound", consumableName: "Gel ultrasound", qtyDefault: 8, unit: "ml", costPerUnit: 240, totalCost: 1920 },
+      { id: "pkgl-5", mode: "manual", consumableName: "Disposable head cover", manualName: "Disposable head cover", qtyDefault: 1, unit: "pcs", costPerUnit: 100, manualCost: 100, totalCost: 100 },
+    ],
+  },
+];

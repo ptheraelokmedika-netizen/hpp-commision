@@ -8,6 +8,20 @@
       "when": 1779608860332,
       "tag": "0000_supreme_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779610640251,
+      "tag": "0001_same_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779611080020,
+      "tag": "0002_small_otto_octavius",
+      "breakpoints": true
     }
   ]
 }

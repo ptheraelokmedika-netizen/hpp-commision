@@ -33,32 +33,41 @@ import {
   treatmentPrice,
   treatmentResult,
 } from "../lib/calculations";
-import { commissionReport, productProfitReport, simulationReport, treatmentHppReport } from "../lib/pdf";
-import { generateId, getData, resetData, saveData } from "../lib/storage";
+import { commissionReport, consumableStockReport, hppPackageReport, productProfitReport, simulationReport, treatmentHppReport } from "../lib/pdf";
+import { clearData, generateId, getData, resetData, saveData } from "../lib/storage";
 import type {
   CommissionAppliesTo,
   CommissionLog,
   CommissionRule,
   CommissionType,
+  ConsumableCategory,
+  ConsumableItem,
+  ConsumableUnit,
   CustomerType,
   FixedCostSettings,
+  HppPackageCategory,
+  HppPackageItem,
+  HppPackageTemplate,
   Product,
   SimulationRecord,
   StaffRole,
   StorageSchema,
   Treatment,
+  TreatmentConsumableUsage,
   TreatmentCostItem,
   TreatmentMachineItem,
   TreatmentMaterialItem,
 } from "../lib/types";
 
-type ViewKey = "dashboard" | "fixed" | "treatments" | "products" | "simulation" | "logs" | "reports";
+type ViewKey = "dashboard" | "fixed" | "treatments" | "consumables" | "hppPackages" | "products" | "simulation" | "logs" | "reports";
 type PriceMode = "Normal" | "VIP" | "Promo" | "Manual";
 
 const navItems: { key: ViewKey; label: string; icon: ElementType }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "fixed", label: "Biaya Tetap", icon: Settings },
   { key: "treatments", label: "Treatment HPP", icon: Sparkles },
+  { key: "consumables", label: "Master Bahan", icon: Package },
+  { key: "hppPackages", label: "Master Paket HPP", icon: ClipboardList },
   { key: "products", label: "Produk / Retail", icon: Package },
   { key: "simulation", label: "Simulasi Harga", icon: Calculator },
   { key: "logs", label: "Log Komisi", icon: ClipboardList },
@@ -66,6 +75,9 @@ const navItems: { key: ViewKey; label: string; icon: ElementType }[] = [
 ];
 
 const roles: StaffRole[] = ["dokter", "therapist", "beautician", "sales", "admin"];
+const consumableCategories: ConsumableCategory[] = ["Disposable", "Skincare / Serum", "Cairan / Liquid", "Alat habis pakai", "Obat / Injectable support", "Other"];
+const consumableUnits: ConsumableUnit[] = ["pcs", "lembar", "ml", "gram", "tube", "bottle", "box", "pack", "vial", "ampoule", "syringe", "cartridge", "drop", "pump", "other"];
+const hppPackageCategories: HppPackageCategory[] = ["Facial", "Injection", "Laser / Energy Based Device", "Meso / Booster", "Body Treatment", "Other"];
 const customerTypes: CustomerType[] = ["Normal", "VIP", "Promo"];
 const appliesToOptions: CommissionAppliesTo[] = ["All", "Normal", "VIP", "Promo"];
 const commissionTypes: { value: CommissionType; label: string }[] = [
@@ -159,6 +171,64 @@ function emptyProduct(): Product {
     commissionRule: { ...emptyRule(), role: "sales" },
     commissionRules: [{ ...emptyRule(), role: "sales" }],
     stockQuantity: 0,
+  };
+}
+
+function emptyConsumable(): ConsumableItem {
+  return {
+    id: generateId("cons"),
+    name: "",
+    category: "Disposable",
+    supplier: "",
+    purchasePrice: 0,
+    purchaseQuantity: 1,
+    purchaseUnit: "pack",
+    totalSmallestUnit: 1,
+    smallestUnit: "pcs",
+    costPerSmallestUnit: 0,
+    availableQuantity: 1,
+    minimumStock: 0,
+    notes: "",
+  };
+}
+
+function emptyHppPackage(): HppPackageTemplate {
+  return {
+    id: generateId("pkg"),
+    name: "",
+    category: "Facial",
+    description: "",
+    items: [],
+    totalCost: 0,
+    updatedAt: new Date().toISOString().slice(0, 10),
+  };
+}
+
+function packageTotal(items: HppPackageItem[]) {
+  return items.reduce((sum, item) => sum + item.totalCost, 0);
+}
+
+function normalizeHppPackage(pkg: HppPackageTemplate): HppPackageTemplate {
+  const items = (pkg.items ?? []).map((item) => ({
+    ...item,
+    qtyDefault: Number(item.qtyDefault) || 0,
+    costPerUnit: Number(item.costPerUnit) || 0,
+    totalCost: item.mode === "manual" ? Number(item.manualCost ?? item.totalCost) || 0 : (Number(item.qtyDefault) || 0) * (Number(item.costPerUnit) || 0),
+  }));
+  return { ...pkg, items, totalCost: packageTotal(items), updatedAt: pkg.updatedAt ?? new Date().toISOString().slice(0, 10) };
+}
+
+function normalizeConsumable(item: ConsumableItem): ConsumableItem {
+  const totalSmallestUnit = Math.max(Number(item.totalSmallestUnit) || 0, 0);
+  const purchaseQuantity = Math.max(Number(item.purchaseQuantity) || 0, 0);
+  const costPerSmallestUnit = totalSmallestUnit > 0 ? Math.round(item.purchasePrice / totalSmallestUnit) : 0;
+  return {
+    ...item,
+    purchaseQuantity,
+    totalSmallestUnit,
+    costPerSmallestUnit,
+    availableQuantity: item.availableQuantity || purchaseQuantity * totalSmallestUnit,
+    minimumStock: Number(item.minimumStock) || 0,
   };
 }
 
@@ -256,12 +326,15 @@ export default function Home() {
   const [view, setView] = useState<ViewKey>("dashboard");
   const [editingTreatment, setEditingTreatment] = useState<Treatment>(emptyTreatment());
   const [editingProduct, setEditingProduct] = useState<Product>(emptyProduct());
+  const [editingConsumable, setEditingConsumable] = useState<ConsumableItem>(emptyConsumable());
+  const [editingHppPackage, setEditingHppPackage] = useState<HppPackageTemplate>(emptyHppPackage());
   const [selectedSimulationId, setSelectedSimulationId] = useState("");
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   const [simulationItemId, setSimulationItemId] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [storageWarning, setStorageWarning] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [databaseStatus, setDatabaseStatus] = useState<"neon" | "local" | "error">("local");
 
   useEffect(() => {
     async function loadData() {
@@ -271,15 +344,19 @@ export default function Home() {
           const payload = await response.json();
           setData(payload.data);
           setStorageWarning("");
+          setLoadError("");
+          setDatabaseStatus("neon");
           return;
         }
 
         const payload = await response.json().catch(() => null);
         setData(getData());
         setStorageWarning(payload?.message ?? "Database belum terhubung, data tersimpan lokal di browser ini.");
+        setDatabaseStatus("local");
       } catch {
         setData(getData());
         setLoadError("Database tidak dapat diakses. Mode lokal browser digunakan sementara.");
+        setDatabaseStatus("error");
         setStorageWarning("Database belum terhubung, data tersimpan lokal di browser ini.");
       }
     }
@@ -299,11 +376,63 @@ export default function Home() {
         if (!response.ok) {
           const payload = await response.json().catch(() => null);
           setStorageWarning(payload?.message ?? "Database belum terhubung, data tersimpan lokal di browser ini.");
+          setDatabaseStatus("local");
         } else {
           setStorageWarning("");
+          setDatabaseStatus("neon");
         }
       })
-      .catch(() => setStorageWarning("Database belum terhubung, data tersimpan lokal di browser ini."));
+      .catch(() => {
+        setStorageWarning("Database belum terhubung, data tersimpan lokal di browser ini.");
+        setDatabaseStatus("error");
+      });
+  };
+
+  const clearAllData = async () => {
+    if (!window.confirm("Yakin ingin mengosongkan semua data? Data treatment, produk, simulasi, log komisi, dan master bahan akan dihapus.")) return;
+    const cleared = clearData();
+    setData(cleared);
+    setEditingTreatment(emptyTreatment());
+    setEditingProduct(emptyProduct());
+    setEditingConsumable(emptyConsumable());
+    setEditingHppPackage(emptyHppPackage());
+    try {
+      const response = await fetch("/api/admin/clear-data", { method: "POST" });
+      if (response.ok) {
+        setDatabaseStatus("neon");
+        setStorageWarning("");
+      } else {
+        const payload = await response.json().catch(() => null);
+        setDatabaseStatus("local");
+        setStorageWarning(payload?.message ?? "Database belum terhubung, data tersimpan lokal di browser ini.");
+      }
+    } catch {
+      setDatabaseStatus("error");
+      setStorageWarning("Database belum terhubung, data tersimpan lokal di browser ini.");
+    }
+  };
+
+  const seedSampleData = async () => {
+    if (!window.confirm("Isi ulang contoh data Hera Clinic?")) return;
+    const seeded = resetData();
+    setData(seeded);
+    try {
+      const response = await fetch("/api/admin/seed-data", { method: "POST" });
+      if (response.ok) {
+        const refresh = await fetch("/api/app-data", { cache: "no-store" });
+        const payload = await refresh.json();
+        setData(payload.data);
+        setDatabaseStatus("neon");
+        setStorageWarning("");
+      } else {
+        const payload = await response.json().catch(() => null);
+        setDatabaseStatus("local");
+        setStorageWarning(payload?.message ?? "Database belum terhubung, data tersimpan lokal di browser ini.");
+      }
+    } catch {
+      setDatabaseStatus("error");
+      setStorageWarning("Database belum terhubung, data tersimpan lokal di browser ini.");
+    }
   };
 
   const breakdown = useMemo(() => (data ? fixedCostBreakdown(data.fixedCosts) : null), [data]);
@@ -325,6 +454,8 @@ export default function Home() {
   const unpaidCommission = data.commissionLogs.filter((log) => log.paymentStatus === "Belum dibayar").reduce((sum, log) => sum + log.commissionAmount, 0);
   const paidCommission = data.commissionLogs.filter((log) => log.paymentStatus === "Sudah dibayar").reduce((sum, log) => sum + log.commissionAmount, 0);
   const estimatedProfit = data.commissionLogs.reduce((sum, log) => sum + log.netProfit, 0);
+  const inventoryValue = (data.consumables ?? []).reduce((sum, item) => sum + item.availableQuantity * item.costPerSmallestUnit, 0);
+  const lowStockCount = (data.consumables ?? []).filter((item) => item.minimumStock > 0 && item.availableQuantity <= item.minimumStock).length;
 
   return (
     <main className="min-h-screen max-w-full overflow-x-hidden bg-[#fff9ef] pb-28 text-[#2e2d28] lg:pb-12">
@@ -408,7 +539,8 @@ export default function Home() {
                 <h2 className="mt-1 break-words text-2xl font-semibold text-[#0d4b3a]">{navItems.find((item) => item.key === view)?.label}</h2>
               </div>
               <div className="flex flex-wrap gap-2">
-                <ActionButton variant="ghost" onClick={() => persist(resetData())}>Reset dummy data</ActionButton>
+                <ActionButton variant="danger" onClick={clearAllData}>Kosongkan Data</ActionButton>
+                <ActionButton variant="ghost" onClick={seedSampleData}>Isi Contoh Data</ActionButton>
                 <ActionButton variant="secondary" onClick={() => commissionReport(data.commissionLogs, "Semua log komisi")}>
                   <FileDown className="h-4 w-4" /> Export Komisi
                 </ActionButton>
@@ -419,6 +551,9 @@ export default function Home() {
                 {storageWarning || loadError}
               </div>
             )}
+            <div className="mt-4 inline-flex rounded-full border border-[#ded2bf] bg-white px-3 py-1 text-xs font-semibold text-[#0d4b3a]">
+              Database: {databaseStatus === "neon" ? "Neon aktif" : databaseStatus === "error" ? "Error koneksi" : "Lokal browser"}
+            </div>
             <div className="mt-4 hidden max-w-full gap-2 overflow-x-auto sm:flex lg:hidden">
               {navItems.map((item) => (
                 <button
@@ -442,6 +577,10 @@ export default function Home() {
                 paidCommission={paidCommission}
                 estimatedProfit={estimatedProfit}
                 lowMarginCount={lowMarginCount}
+                consumableCount={(data.consumables ?? []).length}
+                lowStockCount={lowStockCount}
+                inventoryValue={inventoryValue}
+                hppPackageCount={(data.hppPackages ?? []).length}
                 setView={setView}
               />
             )}
@@ -456,6 +595,22 @@ export default function Home() {
                   setSimulationItemId(id);
                   setView("simulation");
                 }}
+              />
+            )}
+            {view === "consumables" && (
+              <ConsumablesPage
+                data={data}
+                persist={persist}
+                editingConsumable={editingConsumable}
+                setEditingConsumable={setEditingConsumable}
+              />
+            )}
+            {view === "hppPackages" && (
+              <HppPackagesPage
+                data={data}
+                persist={persist}
+                editingPackage={editingHppPackage}
+                setEditingPackage={setEditingHppPackage}
               />
             )}
             {view === "products" && <ProductPage data={data} persist={persist} editingProduct={editingProduct} setEditingProduct={setEditingProduct} />}
@@ -486,9 +641,13 @@ function Dashboard(props: {
   paidCommission: number;
   estimatedProfit: number;
   lowMarginCount: number;
+  consumableCount: number;
+  lowStockCount: number;
+  inventoryValue: number;
+  hppPackageCount: number;
   setView: (view: ViewKey) => void;
 }) {
-  const { data, fixedMonthly, fixedPerCustomer, unpaidCommission, paidCommission, estimatedProfit, lowMarginCount, setView } = props;
+  const { data, fixedMonthly, fixedPerCustomer, unpaidCommission, paidCommission, estimatedProfit, lowMarginCount, consumableCount, lowStockCount, inventoryValue, hppPackageCount, setView } = props;
   return (
     <div className="grid min-w-0 gap-6">
       <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -500,6 +659,10 @@ function Dashboard(props: {
         <StatCard label="Komisi sudah dibayar" value={rupiah(paidCommission)} />
         <StatCard label="Estimasi profit dari log" value={rupiah(estimatedProfit)} tone="gold" />
         <StatCard label="Low margin warning" value={`${lowMarginCount} item`} tone={lowMarginCount ? "rose" : "emerald"} />
+        <StatCard label="Jumlah master bahan" value={`${consumableCount} bahan`} />
+        <StatCard label="Bahan low stock" value={`${lowStockCount} bahan`} tone={lowStockCount ? "rose" : "emerald"} />
+        <StatCard label="Estimasi nilai stok bahan" value={rupiah(inventoryValue)} tone="gold" />
+        <StatCard label="Jumlah Paket HPP" value={`${hppPackageCount} paket`} />
       </div>
       <div className="grid min-w-0 gap-4 lg:grid-cols-3">
         {[
@@ -523,7 +686,7 @@ function MobileBottomNav({ view, setView }: { view: ViewKey; setView: (view: Vie
     { key: "treatments", label: "HPP", icon: Sparkles },
     { key: "simulation", label: "Simulasi", icon: Calculator },
     { key: "logs", label: "Komisi", icon: ClipboardList },
-    { key: "products", label: "Produk", icon: Package },
+    { key: "hppPackages", label: "Paket", icon: ClipboardList },
   ];
 
   return (
@@ -624,7 +787,9 @@ function TreatmentPage(props: {
               <Field label="Durasi treatment (menit)" type="number" value={editingTreatment.durationMinutes} onChange={(value) => updateTreatment({ ...editingTreatment, durationMinutes: Number(value) })} />
             </div>
 
+            <HppPackageInsertSection treatment={editingTreatment} updateTreatment={updateTreatment} packages={data.hppPackages ?? []} />
             <DynamicDisposableSection treatment={editingTreatment} updateTreatment={updateTreatment} />
+            <DynamicConsumableUsageSection treatment={editingTreatment} updateTreatment={updateTreatment} consumables={data.consumables ?? []} />
             <DynamicMaterialSection treatment={editingTreatment} updateTreatment={updateTreatment} />
             <DynamicMachineSection treatment={editingTreatment} updateTreatment={updateTreatment} />
 
@@ -744,6 +909,183 @@ function DynamicDisposableSection({ treatment, updateTreatment }: { treatment: T
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+function HppPackageInsertSection({
+  treatment,
+  updateTreatment,
+  packages,
+}: {
+  treatment: Treatment;
+  updateTreatment: (treatment: Treatment) => void;
+  packages: HppPackageTemplate[];
+}) {
+  const [selectedPackageId, setSelectedPackageId] = useState(packages[0]?.id ?? "");
+  const [mergeSame, setMergeSame] = useState(true);
+  const selectedPackage = packages.find((pkg) => pkg.id === selectedPackageId) ?? packages[0];
+
+  useEffect(() => {
+    if (!selectedPackageId && packages[0]) setSelectedPackageId(packages[0].id);
+  }, [packages, selectedPackageId]);
+
+  const insertPackage = () => {
+    if (!selectedPackage) return;
+    let consumableUsages = [...(treatment.consumableUsages ?? [])];
+    let disposableItems = [...(treatment.disposableItems ?? treatment.disposableCosts ?? [])];
+
+    selectedPackage.items.forEach((item) => {
+      if (item.mode === "master" && item.consumableItemId) {
+        const existingIndex = consumableUsages.findIndex((usage) => usage.consumableId === item.consumableItemId);
+        if (mergeSame && existingIndex >= 0) {
+          consumableUsages = consumableUsages.map((usage, index) =>
+            index === existingIndex
+              ? {
+                  ...usage,
+                  quantityUsed: usage.quantityUsed + item.qtyDefault,
+                  sourcePackageName: usage.sourcePackageName ?? selectedPackage.name,
+                }
+              : usage,
+          );
+        } else {
+          consumableUsages.push({
+            id: generateId("usage"),
+            consumableId: item.consumableItemId,
+            name: item.consumableName,
+            quantityUsed: item.qtyDefault,
+            unit: item.unit,
+            costPerUnit: item.costPerUnit,
+            sourcePackageName: selectedPackage.name,
+            notes: item.notes,
+          });
+        }
+      } else {
+        const name = item.manualName ?? item.consumableName;
+        const amount = item.manualCost ?? item.totalCost;
+        const existingIndex = disposableItems.findIndex((row) => row.name.toLowerCase() === name.toLowerCase());
+        if (mergeSame && existingIndex >= 0) {
+          disposableItems = disposableItems.map((row, index) =>
+            index === existingIndex ? { ...row, amount: row.amount + amount } : row,
+          );
+        } else {
+          disposableItems.push({
+            id: generateId("cost"),
+            name: `${name} (Dari paket: ${selectedPackage.name})`,
+            amount,
+          });
+        }
+      }
+    });
+
+    updateTreatment({ ...treatment, consumableUsages, disposableItems, disposableCosts: disposableItems });
+  };
+
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#d8b65f]/50 bg-[#fff8e8] p-3">
+      <div>
+        <p className="text-sm font-semibold text-[#0d4b3a]">Pilih Paket HPP</p>
+        <p className="mt-1 text-xs leading-5 text-[#756b5d]">Item paket akan disalin ke treatment, sehingga bisa diedit tanpa mengubah template asli.</p>
+      </div>
+      {packages.length === 0 ? (
+        <EmptyState text="Belum ada Master Paket HPP. Buat paket dahulu untuk mempercepat input treatment." />
+      ) : (
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+          <SelectField label="Pilih paket HPP" value={selectedPackage?.id ?? ""} onChange={setSelectedPackageId}>
+            {packages.map((pkg) => <option key={pkg.id} value={pkg.id}>{pkg.name} - {rupiah(pkg.totalCost)}</option>)}
+          </SelectField>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex min-h-11 items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 text-sm">
+              <input type="checkbox" checked={mergeSame} onChange={(event) => setMergeSame(event.target.checked)} />
+              Gabungkan item yang sama
+            </label>
+            <ActionButton onClick={insertPackage}><Plus className="h-4 w-4" /> Masukkan Paket ke Treatment</ActionButton>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DynamicConsumableUsageSection({
+  treatment,
+  updateTreatment,
+  consumables,
+}: {
+  treatment: Treatment;
+  updateTreatment: (treatment: Treatment) => void;
+  consumables: ConsumableItem[];
+}) {
+  const usages = treatment.consumableUsages ?? [];
+  const addFromMaster = () => {
+    const first = consumables[0];
+    if (!first) return;
+    updateTreatment({
+      ...treatment,
+      consumableUsages: [
+        ...usages,
+        {
+          id: generateId("usage"),
+          consumableId: first.id,
+          name: first.name,
+          quantityUsed: 1,
+          unit: first.smallestUnit,
+          costPerUnit: first.costPerSmallestUnit,
+          notes: "",
+        },
+      ],
+    });
+  };
+  const updateUsage = (id: string, patch: Partial<TreatmentConsumableUsage>) =>
+    updateTreatment({ ...treatment, consumableUsages: usages.map((usage) => (usage.id === id ? { ...usage, ...patch } : usage)) });
+
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-[#0d4b3a]">Bahan dari Master</p>
+          <p className="mt-1 text-xs leading-5 text-[#756b5d]">
+            Contoh: Sabun 1 liter = 1000 ml. Jika 1 pasien memakai 5 ml, sistem otomatis menghitung HPP per pasien.
+          </p>
+        </div>
+        <ActionButton variant="ghost" onClick={addFromMaster}>
+          <Plus className="h-4 w-4" /> Tambah bahan dari master
+        </ActionButton>
+      </div>
+      {consumables.length === 0 && <EmptyState text="Master bahan masih kosong. Tambahkan bahan terlebih dahulu di halaman Master Bahan." />}
+      {usages.map((usage) => {
+        const selected = consumables.find((item) => item.id === usage.consumableId);
+        return (
+          <div key={usage.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_120px_100px_130px_130px_44px]">
+            <div className="grid gap-1">
+              <select
+                value={usage.consumableId}
+                onChange={(event) => {
+                  const item = consumables.find((candidate) => candidate.id === event.target.value);
+                  if (!item) return;
+                  updateUsage(usage.id, {
+                    consumableId: item.id,
+                    name: item.name,
+                    unit: item.smallestUnit,
+                    costPerUnit: item.costPerSmallestUnit,
+                  });
+                }}
+                className={inputClass()}
+              >
+                {consumables.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+              {usage.sourcePackageName && <span className="w-fit rounded-full bg-[#0d4b3a]/10 px-2 py-1 text-[11px] font-semibold text-[#0d4b3a]">Dari paket: {usage.sourcePackageName}</span>}
+            </div>
+            <input type="number" value={usage.quantityUsed} onChange={(event) => updateUsage(usage.id, { quantityUsed: Number(event.target.value) })} className={inputClass()} placeholder="Qty terpakai" />
+            <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-white px-3 text-sm">{selected?.smallestUnit ?? usage.unit}</div>
+            <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-white px-3 text-sm">{rupiah(selected?.costPerSmallestUnit ?? usage.costPerUnit)}</div>
+            <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-white px-3 text-sm font-semibold text-[#0d4b3a]">{rupiah(usage.quantityUsed * (selected?.costPerSmallestUnit ?? usage.costPerUnit))}</div>
+            <button type="button" onClick={() => updateTreatment({ ...treatment, consumableUsages: usages.filter((row) => row.id !== usage.id) })} className="min-h-11 rounded-lg border border-[#e1aaa0] text-[#a33a2d]">
+              <Trash2 className="mx-auto h-4 w-4" />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -976,6 +1318,353 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ConsumablesPage({
+  data,
+  persist,
+  editingConsumable,
+  setEditingConsumable,
+}: {
+  data: StorageSchema;
+  persist: (next: StorageSchema) => void;
+  editingConsumable: ConsumableItem;
+  setEditingConsumable: (item: ConsumableItem) => void;
+}) {
+  const draft = normalizeConsumable(editingConsumable);
+  const lowStockCount = (data.consumables ?? []).filter((item) => item.minimumStock > 0 && item.availableQuantity <= item.minimumStock).length;
+  const inventoryValue = (data.consumables ?? []).reduce((sum, item) => sum + item.availableQuantity * item.costPerSmallestUnit, 0);
+
+  const saveConsumable = () => {
+    if (!draft.name.trim()) return;
+    const exists = data.consumables.some((item) => item.id === draft.id);
+    persist({
+      ...data,
+      consumables: exists ? data.consumables.map((item) => (item.id === draft.id ? draft : item)) : [draft, ...data.consumables],
+    });
+    setEditingConsumable(emptyConsumable());
+  };
+  const deleteConsumable = (id: string) => {
+    if (window.confirm("Hapus bahan ini dari master?")) persist({ ...data, consumables: data.consumables.filter((item) => item.id !== id) });
+  };
+
+  return (
+    <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
+      <Card>
+        <h3 className="text-lg font-semibold text-[#0d4b3a]">Master Bahan</h3>
+        <p className="mt-2 text-sm leading-6 text-[#756b5d]">
+          Contoh: Sabun 1 liter = 1000 ml. Jika 1 pasien memakai 5 ml, sistem otomatis menghitung HPP per pasien.
+        </p>
+        <div className="mt-4 grid gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Nama bahan" value={draft.name} onChange={(value) => setEditingConsumable({ ...draft, name: value })} />
+            <SelectField label="Kategori" value={draft.category} onChange={(value) => setEditingConsumable({ ...draft, category: value as ConsumableCategory })}>
+              {consumableCategories.map((category) => <option key={category}>{category}</option>)}
+            </SelectField>
+            <Field label="Supplier optional" value={draft.supplier ?? ""} onChange={(value) => setEditingConsumable({ ...draft, supplier: value })} />
+            <Field label="Harga beli" type="number" value={draft.purchasePrice} onChange={(value) => setEditingConsumable({ ...draft, purchasePrice: Number(value) })} />
+            <Field label="Stock purchase quantity optional" type="number" value={draft.purchaseQuantity} onChange={(value) => setEditingConsumable({ ...draft, purchaseQuantity: Number(value) })} />
+            <SelectField label="Unit pembelian" value={draft.purchaseUnit} onChange={(value) => setEditingConsumable({ ...draft, purchaseUnit: value as ConsumableUnit })}>
+              {consumableUnits.map((unit) => <option key={unit}>{unit}</option>)}
+            </SelectField>
+            <Field label="Total isi dalam unit terkecil" type="number" value={draft.totalSmallestUnit} onChange={(value) => setEditingConsumable({ ...draft, totalSmallestUnit: Number(value) })} />
+            <SelectField label="Unit terkecil" value={draft.smallestUnit} onChange={(value) => setEditingConsumable({ ...draft, smallestUnit: value as ConsumableUnit })}>
+              {consumableUnits.map((unit) => <option key={unit}>{unit}</option>)}
+            </SelectField>
+            <Field label="Stok minimum" type="number" value={draft.minimumStock} onChange={(value) => setEditingConsumable({ ...draft, minimumStock: Number(value) })} />
+            <Field label="Notes" value={draft.notes ?? ""} onChange={(value) => setEditingConsumable({ ...draft, notes: value })} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard label="Biaya per unit" value={rupiah(draft.costPerSmallestUnit)} />
+            <StatCard label="Stok tersedia" value={`${draft.availableQuantity} ${draft.smallestUnit}`} />
+            <StatCard label="Nilai stok" value={rupiah(draft.availableQuantity * draft.costPerSmallestUnit)} tone="gold" />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <ActionButton onClick={saveConsumable}><Save className="h-4 w-4" /> Simpan bahan</ActionButton>
+            <ActionButton variant="ghost" onClick={() => setEditingConsumable(emptyConsumable())}><Plus className="h-4 w-4" /> Baru</ActionButton>
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid min-w-0 gap-6">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <StatCard label="Jumlah master bahan" value={`${data.consumables.length} bahan`} />
+          <StatCard label="Bahan low stock" value={`${lowStockCount} bahan`} tone={lowStockCount ? "rose" : "emerald"} />
+          <StatCard label="Estimasi nilai stok bahan" value={rupiah(inventoryValue)} tone="gold" />
+        </div>
+        <Card>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-lg font-semibold text-[#0d4b3a]">Daftar Master Bahan</h3>
+            <ActionButton variant="secondary" onClick={() => consumableStockReport(data.consumables)}><FileDown className="h-4 w-4" /> PDF</ActionButton>
+          </div>
+          {data.consumables.length === 0 ? <EmptyState text="Belum ada master bahan." /> : (
+            <>
+              <div className="grid gap-3 md:hidden">
+                {data.consumables.map((item) => {
+                  const low = item.minimumStock > 0 && item.availableQuantity <= item.minimumStock;
+                  return (
+                    <div key={`cons-mobile-${item.id}`} className="rounded-lg border border-[#eadfce] bg-[#fffaf2] p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-[#0d4b3a]">{item.name}</p>
+                          <p className="text-xs text-[#7a7265]">{item.category} - {item.supplier || "Tanpa supplier"}</p>
+                        </div>
+                        {low && <span className="rounded-full bg-[#fff2ef] px-2 py-1 text-xs font-semibold text-[#a33a2d]">Low stock</span>}
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <MiniMetric label="Harga beli" value={rupiah(item.purchasePrice)} />
+                        <MiniMetric label="Isi" value={`${item.totalSmallestUnit} ${item.smallestUnit}`} />
+                        <MiniMetric label="Biaya per unit" value={rupiah(item.costPerSmallestUnit)} />
+                        <MiniMetric label="Stok tersedia" value={`${item.availableQuantity} ${item.smallestUnit}`} />
+                      </div>
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <ActionButton variant="ghost" onClick={() => setEditingConsumable(item)}>Edit</ActionButton>
+                        <ActionButton variant="danger" onClick={() => deleteConsumable(item.id)}><Trash2 className="h-4 w-4" /></ActionButton>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="hidden max-w-full overflow-x-auto md:block">
+                <table className="w-full min-w-[980px] text-sm">
+                  <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+                    <tr>{["Nama bahan", "Harga beli", "Isi", "Unit terkecil", "Biaya/unit", "Stok tersedia", "Low stock", "Aksi"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {data.consumables.map((item) => {
+                      const low = item.minimumStock > 0 && item.availableQuantity <= item.minimumStock;
+                      return (
+                        <tr key={item.id} className="border-b border-[#efe4d2]">
+                          <td className="p-3"><p className="font-semibold text-[#0d4b3a]">{item.name}</p><p className="text-xs text-[#7a7265]">{item.supplier || "-"}</p></td>
+                          <td className="p-3">{rupiah(item.purchasePrice)}</td>
+                          <td className="p-3">{item.totalSmallestUnit} {item.smallestUnit}</td>
+                          <td className="p-3">{item.smallestUnit}</td>
+                          <td className="p-3">{rupiah(item.costPerSmallestUnit)}</td>
+                          <td className="p-3">{item.availableQuantity} {item.smallestUnit}</td>
+                          <td className="p-3">{low ? "Low stock" : "Aman"}</td>
+                          <td className="p-3"><div className="flex gap-2"><ActionButton variant="ghost" onClick={() => setEditingConsumable(item)}>Edit</ActionButton><ActionButton variant="danger" onClick={() => deleteConsumable(item.id)}><Trash2 className="h-4 w-4" /></ActionButton></div></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function HppPackagesPage({
+  data,
+  persist,
+  editingPackage,
+  setEditingPackage,
+}: {
+  data: StorageSchema;
+  persist: (next: StorageSchema) => void;
+  editingPackage: HppPackageTemplate;
+  setEditingPackage: (pkg: HppPackageTemplate) => void;
+}) {
+  const draft = normalizeHppPackage(editingPackage);
+  const updateDraft = (next: HppPackageTemplate) => setEditingPackage(normalizeHppPackage(next));
+  const savePackage = () => {
+    if (!draft.name.trim()) return;
+    const exists = data.hppPackages.some((pkg) => pkg.id === draft.id);
+    persist({
+      ...data,
+      hppPackages: exists ? data.hppPackages.map((pkg) => (pkg.id === draft.id ? draft : pkg)) : [draft, ...data.hppPackages],
+    });
+    setEditingPackage(emptyHppPackage());
+  };
+  const duplicatePackage = (pkg: HppPackageTemplate) => {
+    const copy = { ...pkg, id: generateId("pkg"), name: `${pkg.name} Copy`, updatedAt: new Date().toISOString().slice(0, 10) };
+    persist({ ...data, hppPackages: [copy, ...data.hppPackages] });
+  };
+  const deletePackage = (id: string) => {
+    if (window.confirm("Hapus Master Paket HPP ini?")) persist({ ...data, hppPackages: data.hppPackages.filter((pkg) => pkg.id !== id) });
+  };
+
+  return (
+    <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)]">
+      <Card>
+        <h3 className="text-lg font-semibold text-[#0d4b3a]">Master Paket HPP</h3>
+        <p className="mt-2 text-sm leading-6 text-[#756b5d]">Buat template bahan treatment berulang seperti Basic Facial Set atau Meso Default Set.</p>
+        <div className="mt-4 grid gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Nama paket" value={draft.name} onChange={(value) => updateDraft({ ...draft, name: value })} />
+            <SelectField label="Kategori paket" value={draft.category} onChange={(value) => updateDraft({ ...draft, category: value as HppPackageCategory })}>
+              {hppPackageCategories.map((category) => <option key={category}>{category}</option>)}
+            </SelectField>
+          </div>
+          <Field label="Description / notes optional" value={draft.description ?? ""} onChange={(value) => updateDraft({ ...draft, description: value })} />
+          <PackageItemEditor pkg={draft} consumables={data.consumables} onChange={updateDraft} />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard label="Total HPP paket" value={rupiah(draft.totalCost)} />
+            <StatCard label="Jumlah item" value={`${draft.items.length} item`} />
+            <StatCard label="Last updated" value={draft.updatedAt ?? "-"} tone="gold" />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <ActionButton onClick={savePackage}><Save className="h-4 w-4" /> Simpan paket</ActionButton>
+            <ActionButton variant="ghost" onClick={() => setEditingPackage(emptyHppPackage())}><Plus className="h-4 w-4" /> Paket baru</ActionButton>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-lg font-semibold text-[#0d4b3a]">Daftar Paket HPP</h3>
+          <ActionButton variant="secondary" onClick={() => hppPackageReport(data.hppPackages)}><FileDown className="h-4 w-4" /> PDF</ActionButton>
+        </div>
+        {data.hppPackages.length === 0 ? <EmptyState text="Belum ada Master Paket HPP." /> : (
+          <>
+            <div className="grid gap-3 md:hidden">
+              {data.hppPackages.map((pkg) => (
+                <div key={`pkg-mobile-${pkg.id}`} className="rounded-lg border border-[#eadfce] bg-[#fffaf2] p-4">
+                  <p className="font-semibold text-[#0d4b3a]">{pkg.name}</p>
+                  <p className="text-xs text-[#7a7265]">{pkg.category} - {pkg.items.length} item</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <MiniMetric label="Total HPP paket" value={rupiah(pkg.totalCost)} />
+                    <MiniMetric label="Last updated" value={pkg.updatedAt ?? "-"} />
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <ActionButton variant="ghost" onClick={() => setEditingPackage(pkg)}>Edit</ActionButton>
+                    <ActionButton variant="secondary" onClick={() => duplicatePackage(pkg)}><Copy className="h-4 w-4" /> Duplikasi</ActionButton>
+                    <ActionButton variant="danger" onClick={() => deletePackage(pkg.id)}><Trash2 className="h-4 w-4" /> Hapus</ActionButton>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden max-w-full overflow-x-auto md:block">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+                  <tr>{["Nama paket", "Kategori", "Jumlah item", "Total HPP paket", "Last updated", "Aksi"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {data.hppPackages.map((pkg) => (
+                    <tr key={pkg.id} className="border-b border-[#efe4d2]">
+                      <td className="p-3"><p className="font-semibold text-[#0d4b3a]">{pkg.name}</p><p className="text-xs text-[#7a7265]">{pkg.description ?? "-"}</p></td>
+                      <td className="p-3">{pkg.category}</td>
+                      <td className="p-3">{pkg.items.length}</td>
+                      <td className="p-3">{rupiah(pkg.totalCost)}</td>
+                      <td className="p-3">{pkg.updatedAt ?? "-"}</td>
+                      <td className="p-3"><div className="flex flex-wrap gap-2"><ActionButton variant="ghost" onClick={() => setEditingPackage(pkg)}>Edit</ActionButton><ActionButton variant="secondary" onClick={() => duplicatePackage(pkg)}><Copy className="h-4 w-4" /></ActionButton><ActionButton variant="danger" onClick={() => deletePackage(pkg.id)}><Trash2 className="h-4 w-4" /></ActionButton></div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function PackageItemEditor({
+  pkg,
+  consumables,
+  onChange,
+}: {
+  pkg: HppPackageTemplate;
+  consumables: ConsumableItem[];
+  onChange: (pkg: HppPackageTemplate) => void;
+}) {
+  const updateItems = (items: HppPackageItem[]) => onChange({ ...pkg, items, totalCost: packageTotal(items), updatedAt: new Date().toISOString().slice(0, 10) });
+  const addMaster = () => {
+    const first = consumables[0];
+    if (!first) return;
+    updateItems([
+      ...pkg.items,
+      {
+        id: generateId("pkgitem"),
+        mode: "master",
+        consumableItemId: first.id,
+        consumableName: first.name,
+        qtyDefault: 1,
+        unit: first.smallestUnit,
+        costPerUnit: first.costPerSmallestUnit,
+        totalCost: first.costPerSmallestUnit,
+        notes: "",
+      },
+    ]);
+  };
+  const addManual = () => {
+    updateItems([
+      ...pkg.items,
+      {
+        id: generateId("pkgitem"),
+        mode: "manual",
+        consumableName: "",
+        manualName: "",
+        qtyDefault: 1,
+        unit: "pcs",
+        costPerUnit: 0,
+        manualCost: 0,
+        totalCost: 0,
+        notes: "",
+      },
+    ]);
+  };
+  const updateItem = (id: string, patch: Partial<HppPackageItem>) =>
+    updateItems(pkg.items.map((item) => {
+      if (item.id !== id) return item;
+      const next = { ...item, ...patch };
+      const totalCost = next.mode === "manual" ? Number(next.manualCost ?? 0) : Number(next.qtyDefault ?? 0) * Number(next.costPerUnit ?? 0);
+      return { ...next, totalCost };
+    }));
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-[#0d4b3a]">Item paket</p>
+        <div className="flex flex-wrap gap-2">
+          <ActionButton variant="ghost" onClick={addMaster}><Plus className="h-4 w-4" /> Dari Master Bahan</ActionButton>
+          <ActionButton variant="ghost" onClick={addManual}><Plus className="h-4 w-4" /> Item manual</ActionButton>
+        </div>
+      </div>
+      {pkg.items.length === 0 && <EmptyState text="Belum ada item paket." />}
+      {pkg.items.map((item) => (
+        <div key={item.id} className="grid gap-2 rounded-lg border border-[#eadfce] bg-white p-3">
+          {item.mode === "master" ? (
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_100px_130px_130px_44px]">
+              <select
+                value={item.consumableItemId ?? ""}
+                onChange={(event) => {
+                  const selected = consumables.find((candidate) => candidate.id === event.target.value);
+                  if (!selected) return;
+                  updateItem(item.id, {
+                    consumableItemId: selected.id,
+                    consumableName: selected.name,
+                    unit: selected.smallestUnit,
+                    costPerUnit: selected.costPerSmallestUnit,
+                  });
+                }}
+                className={inputClass()}
+              >
+                {consumables.map((consumable) => <option key={consumable.id} value={consumable.id}>{consumable.name}</option>)}
+              </select>
+              <input type="number" value={item.qtyDefault} onChange={(event) => updateItem(item.id, { qtyDefault: Number(event.target.value) })} className={inputClass()} placeholder="Qty default" />
+              <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-[#fffaf2] px-3 text-sm">{item.unit}</div>
+              <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-[#fffaf2] px-3 text-sm">{rupiah(item.costPerUnit)}</div>
+              <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-[#fffaf2] px-3 text-sm font-semibold text-[#0d4b3a]">{rupiah(item.totalCost)}</div>
+              <button type="button" onClick={() => updateItems(pkg.items.filter((row) => row.id !== item.id))} className="min-h-11 rounded-lg border border-[#e1aaa0] text-[#a33a2d]"><Trash2 className="mx-auto h-4 w-4" /></button>
+            </div>
+          ) : (
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_130px_minmax(0,1fr)_44px]">
+              <input value={item.manualName ?? ""} onChange={(event) => updateItem(item.id, { manualName: event.target.value, consumableName: event.target.value })} className={inputClass()} placeholder="Nama item manual" />
+              <input type="number" value={item.manualCost ?? 0} onChange={(event) => updateItem(item.id, { manualCost: Number(event.target.value), totalCost: Number(event.target.value) })} className={inputClass()} placeholder="Default cost" />
+              <select value={item.unit} onChange={(event) => updateItem(item.id, { unit: event.target.value as ConsumableUnit })} className={inputClass()}>{consumableUnits.map((unit) => <option key={unit}>{unit}</option>)}</select>
+              <input value={item.notes ?? ""} onChange={(event) => updateItem(item.id, { notes: event.target.value })} className={inputClass()} placeholder="Notes optional" />
+              <button type="button" onClick={() => updateItems(pkg.items.filter((row) => row.id !== item.id))} className="min-h-11 rounded-lg border border-[#e1aaa0] text-[#a33a2d]"><Trash2 className="mx-auto h-4 w-4" /></button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ProductPage({ data, persist, editingProduct, setEditingProduct }: { data: StorageSchema; persist: (next: StorageSchema) => void; editingProduct: Product; setEditingProduct: (product: Product) => void }) {
   const productRules: CommissionRule[] = (editingProduct.commissionRules ?? [{ ...editingProduct.commissionRule, appliesTo: "All" }]).map((rule) => ({
     ...rule,
@@ -1131,6 +1820,7 @@ function SimulationPage({ data, persist, initialItemId, selectedSimulationId, se
   const [quantity, setQuantity] = useState(1);
   const [staffName, setStaffName] = useState("Staff Hera");
   const [staffRole, setStaffRole] = useState<StaffRole>("therapist");
+  const [deductStock, setDeductStock] = useState(false);
 
   useEffect(() => {
     if (initialItemId) setItemId(initialItemId);
@@ -1170,7 +1860,16 @@ function SimulationPage({ data, persist, initialItemId, selectedSimulationId, se
       netProfit: simulation.netProfit,
       paymentStatus: "Belum dibayar",
     };
-    persist({ ...data, commissionLogs: [log, ...data.commissionLogs] });
+    const nextConsumables =
+      deductStock && currentTreatment
+        ? data.consumables.map((item) => {
+            const used = (currentTreatment.consumableUsages ?? [])
+              .filter((usage) => usage.consumableId === item.id)
+              .reduce((sum, usage) => sum + usage.quantityUsed * quantity, 0);
+            return used > 0 ? { ...item, availableQuantity: Math.max(0, item.availableQuantity - used) } : item;
+          })
+        : data.consumables;
+    persist({ ...data, commissionLogs: [log, ...data.commissionLogs], consumables: nextConsumables });
   };
 
   return (
@@ -1191,6 +1890,12 @@ function SimulationPage({ data, persist, initialItemId, selectedSimulationId, se
             <SelectField label="Role staff utama" value={staffRole} onChange={(value) => setStaffRole(value as StaffRole)}>
               {roles.map((role) => <option key={role}>{role}</option>)}
             </SelectField>
+            {currentTreatment && (
+              <label className="flex min-w-0 items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 py-3 text-sm text-[#4d473d] md:col-span-2">
+                <input type="checkbox" checked={deductStock} onChange={(event) => setDeductStock(event.target.checked)} />
+                Kurangi stok bahan dari Master Bahan
+              </label>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <ActionButton onClick={saveSimulation}><Save className="h-4 w-4" /> Save to simulation log</ActionButton>
@@ -1297,6 +2002,8 @@ function ReportsPage({ data, selectedSimulationId }: { data: StorageSchema; sele
     { title: "Price Simulation Report", body: "PDF dari simulasi harga terakhir atau simulasi yang dipilih.", action: () => selectedSimulation && simulationReport(selectedSimulation) },
     { title: "Commission Report by date range", body: "Log komisi lengkap dengan total sales, total komisi, status pembayaran, dan net profit.", action: () => commissionReport(data.commissionLogs, "Semua tanggal") },
     { title: "Product Profit Report", body: "Profit produk retail berdasarkan tier modal, harga normal, VIP, promo, dan komisi.", action: () => productProfitReport(data.products) },
+    { title: "Master Bahan & Stok", body: "Daftar bahan internal, biaya per unit terkecil, stok tersedia, nilai stok, dan low stock.", action: () => consumableStockReport(data.consumables) },
+    { title: "Master Paket HPP", body: "Template paket bahan treatment, item list, qty, unit, dan total HPP paket.", action: () => hppPackageReport(data.hppPackages) },
   ];
   return (
     <div className="grid min-w-0 gap-4 md:grid-cols-2">

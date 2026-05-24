@@ -61,9 +61,11 @@ export function fixedCostBreakdown(settings: FixedCostSettings) {
 
 export function directTreatmentCost(treatment: Treatment) {
   const disposableItems = treatment.disposableItems ?? treatment.disposableCosts ?? [];
+  const consumableUsages = treatment.consumableUsages ?? [];
   const materialItems = treatment.materialItems ?? [];
   const machineItems = treatment.machineItems ?? [];
   const disposableTotal = disposableItems.reduce((sum, item) => sum + item.amount, 0);
+  const consumableTotal = consumableUsages.reduce((sum, item) => sum + item.quantityUsed * item.costPerUnit, 0);
   const materialTotal =
     materialItems.length > 0
       ? materialItems.reduce((sum, item) => sum + item.quantity * item.unitCost, 0)
@@ -71,7 +73,7 @@ export function directTreatmentCost(treatment: Treatment) {
   const machineTotal =
     machineItems.length > 0 ? machineItems.reduce((sum, item) => sum + item.amount, 0) : treatment.machineCostAllocation;
 
-  return disposableTotal + materialTotal + machineTotal;
+  return disposableTotal + consumableTotal + materialTotal + machineTotal;
 }
 
 export function commissionAmount(

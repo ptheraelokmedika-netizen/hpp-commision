@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { productResult, rupiah, treatmentResult } from "./calculations";
-import type { CommissionLog, FixedCostSettings, Product, SimulationRecord, Treatment } from "./types";
+import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, Treatment } from "./types";
 
 function title(doc: jsPDF, reportTitle: string, notes?: string) {
   doc.setFillColor(13, 75, 58);
@@ -118,4 +118,54 @@ export function productProfitReport(products: Product[]) {
     headStyles: { fillColor: [13, 75, 58] },
   });
   save(doc, "hera-produk-profit");
+}
+
+export function consumableStockReport(consumables: ConsumableItem[]) {
+  const doc = new jsPDF();
+  title(doc, "Master Bahan & Stok");
+  autoTable(doc, {
+    startY: 48,
+    head: [["Nama bahan", "Supplier", "Harga beli", "Unit terkecil", "Biaya/unit", "Stok tersedia", "Nilai stok", "Status"]],
+    body: consumables.map((item) => {
+      const stockValue = item.availableQuantity * item.costPerSmallestUnit;
+      const low = item.minimumStock > 0 && item.availableQuantity <= item.minimumStock;
+      return [
+        item.name,
+        item.supplier ?? "-",
+        rupiah(item.purchasePrice),
+        item.smallestUnit,
+        rupiah(item.costPerSmallestUnit),
+        `${item.availableQuantity} ${item.smallestUnit}`,
+        rupiah(stockValue),
+        low ? "Low stock" : "Aman",
+      ];
+    }),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [13, 75, 58] },
+  });
+  save(doc, "hera-master-bahan-stok");
+}
+
+export function hppPackageReport(packages: HppPackageTemplate[]) {
+  const doc = new jsPDF();
+  title(doc, "Master Paket HPP");
+  autoTable(doc, {
+    startY: 48,
+    head: [["Nama paket", "Kategori", "Item", "Qty", "Unit", "Cost/unit", "Total", "Notes"]],
+    body: packages.flatMap((pkg) =>
+      pkg.items.map((item) => [
+        pkg.name,
+        pkg.category,
+        item.mode === "master" ? item.consumableName : item.manualName ?? item.consumableName,
+        item.qtyDefault,
+        item.unit,
+        rupiah(item.costPerUnit),
+        rupiah(item.totalCost),
+        item.notes ?? pkg.description ?? "-",
+      ]),
+    ),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [13, 75, 58] },
+  });
+  save(doc, "hera-master-paket-hpp");
 }
