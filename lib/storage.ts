@@ -10,6 +10,8 @@ export const initialData: StorageSchema = {
   simulations: sampleSimulations,
   commissionLogs: sampleCommissionLogs,
   consumables: sampleConsumables,
+  stockAdjustments: [],
+  stockOpnames: [],
   hppPackages: sampleHppPackages,
   categories: sampleCategories,
 };
@@ -42,6 +44,8 @@ export const emptyData: StorageSchema = {
   simulations: [],
   commissionLogs: [],
   consumables: [],
+  stockAdjustments: [],
+  stockOpnames: [],
   hppPackages: [],
   categories: [],
 };
@@ -193,15 +197,28 @@ function normalizeData(data: StorageSchema): StorageSchema {
         };
       }),
     })),
-    consumables: (data.consumables ?? []).map((item) => ({
-      ...item,
-      purchaseQuantity: item.purchaseQuantity ?? 1,
-      costPerSmallestUnit:
-        item.costPerSmallestUnit ?? (item.totalSmallestUnit > 0 ? item.purchasePrice / item.totalSmallestUnit : 0),
-      availableQuantity:
-        item.availableQuantity ?? (item.purchaseQuantity ?? 1) * (item.totalSmallestUnit ?? 0),
-      minimumStock: item.minimumStock ?? 0,
-    })),
+    consumables: (data.consumables ?? []).map((item) => {
+      const purchaseQuantity = item.purchaseQuantity ?? 1;
+      const totalSmallestUnit = item.totalSmallestUnit ?? 0;
+      const legacyAvailable = item.availableQuantity ?? purchaseQuantity * totalSmallestUnit;
+      const currentStock = item.currentStock ?? legacyAvailable ?? totalSmallestUnit ?? 0;
+      const now = new Date().toISOString().slice(0, 10);
+      return {
+        ...item,
+        purchaseQuantity,
+        costPerSmallestUnit:
+          item.costPerSmallestUnit ?? (totalSmallestUnit > 0 ? item.purchasePrice / totalSmallestUnit : 0),
+        availableQuantity: currentStock,
+        currentStock,
+        stockUnit: item.stockUnit ?? item.smallestUnit,
+        minimumStock: item.minimumStock ?? 0,
+        active: item.active ?? true,
+        createdAt: item.createdAt ?? now,
+        updatedAt: item.updatedAt ?? now,
+      };
+    }),
+    stockAdjustments: data.stockAdjustments ?? [],
+    stockOpnames: data.stockOpnames ?? [],
     hppPackages: (data.hppPackages ?? []).map((item) => ({
       ...item,
       items: item.items ?? [],

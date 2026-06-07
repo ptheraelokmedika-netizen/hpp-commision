@@ -1,9 +1,9 @@
 import { eq, inArray } from "drizzle-orm";
 import { emptyData, initialData } from "../../lib/storage";
 import { normalizeFixedCostSettings } from "../../lib/storage";
-import type { CommissionLog, ConsumableItem, FixedCostSettings, HppCategory, HppPackageTemplate, Product, SimulationRecord, StorageSchema, Treatment } from "../../lib/types";
+import type { CommissionLog, ConsumableItem, FixedCostSettings, HppCategory, HppPackageTemplate, Product, SimulationRecord, StockAdjustment, StockOpname, StorageSchema, Treatment } from "../../lib/types";
 import { getDb } from "./index";
-import { commissionLogs, consumableItems, fixedCostSettings, hppCategories, hppPackageTemplates, products, simulationRecords, treatments } from "./schema";
+import { commissionLogs, consumableItems, fixedCostSettings, hppCategories, hppPackageTemplates, products, simulationRecords, stockAdjustments, stockOpnames, treatments } from "./schema";
 
 const SETTINGS_ID = "hera-clinic-default";
 
@@ -122,7 +122,7 @@ function treatmentFromDb(row: typeof treatments.$inferSelect): Treatment {
 
 function consumableToDb(item: ConsumableItem) {
   const costPerSmallestUnit = item.totalSmallestUnit > 0 ? Math.round(item.purchasePrice / item.totalSmallestUnit) : 0;
-  const availableQuantity = item.availableQuantity ?? item.purchaseQuantity * item.totalSmallestUnit;
+  const currentStock = Math.round(item.currentStock ?? item.availableQuantity ?? item.purchaseQuantity * item.totalSmallestUnit);
   return {
     id: item.id,
     name: item.name,
@@ -134,9 +134,16 @@ function consumableToDb(item: ConsumableItem) {
     totalSmallestUnit: Math.round(item.totalSmallestUnit),
     smallestUnit: item.smallestUnit,
     costPerSmallestUnit,
-    availableQuantity: Math.round(availableQuantity),
+    availableQuantity: currentStock,
     minimumStock: Math.round(item.minimumStock || 0),
+    currentStock,
+    stockUnit: item.stockUnit ?? item.smallestUnit,
+    lastStockCheckDate: item.lastStockCheckDate ?? null,
+    lastStockCheckBy: item.lastStockCheckBy ?? null,
+    lastPhysicalStock: item.lastPhysicalStock == null ? null : Math.round(item.lastPhysicalStock),
+    lastStockDifference: item.lastStockDifference == null ? null : Math.round(item.lastStockDifference),
     notes: item.notes ?? null,
+    active: item.active ?? true,
     updatedAt: new Date(),
   };
 }
@@ -155,7 +162,55 @@ function consumableFromDb(row: typeof consumableItems.$inferSelect): ConsumableI
     costPerSmallestUnit: row.costPerSmallestUnit,
     availableQuantity: row.availableQuantity,
     minimumStock: row.minimumStock,
+    currentStock: row.currentStock ?? row.availableQuantity,
+    stockUnit: row.stockUnit as ConsumableItem["stockUnit"],
+    lastStockCheckDate: row.lastStockCheckDate ?? undefined,
+    lastStockCheckBy: row.lastStockCheckBy ?? undefined,
+    lastPhysicalStock: row.lastPhysicalStock ?? undefined,
+    lastStockDifference: row.lastStockDifference ?? undefined,
     notes: row.notes ?? undefined,
+    active: row.active,
+    createdAt: row.createdAt.toISOString().slice(0, 10),
+    updatedAt: row.updatedAt.toISOString().slice(0, 10),
+  };
+}
+
+function stockAdjustmentToDb(item: StockAdjustment) {
+  return { ...item, notes: item.notes ?? null, createdAt: new Date(item.createdAt) };
+}
+
+function stockAdjustmentFromDb(row: typeof stockAdjustments.$inferSelect): StockAdjustment {
+  return {
+    id: row.id,
+    materialId: row.materialId,
+    materialNameSnapshot: row.materialNameSnapshot,
+    type: row.type as StockAdjustment["type"],
+    quantity: row.quantity,
+    previousStock: row.previousStock,
+    newStock: row.newStock,
+    reason: row.reason as StockAdjustment["reason"],
+    notes: row.notes ?? undefined,
+    date: row.date,
+    pic: row.pic,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function stockOpnameToDb(item: StockOpname) {
+  return { ...item, location: item.location ?? null, notes: item.notes ?? null, items: item.items, createdAt: new Date(item.createdAt), updatedAt: new Date() };
+}
+
+function stockOpnameFromDb(row: typeof stockOpnames.$inferSelect): StockOpname {
+  return {
+    id: row.id,
+    date: row.date,
+    checkedBy: row.checkedBy,
+    location: row.location ?? undefined,
+    notes: row.notes ?? undefined,
+    status: row.status as StockOpname["status"],
+    items: row.items as StockOpname["items"],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -338,7 +393,7 @@ function logFromDb(row: typeof commissionLogs.$inferSelect): CommissionLog {
 
 export async function getAppData(): Promise<StorageSchema> {
   const db = getDb();
-  const [settingsRows, treatmentRows, productRows, simulationRows, logRows, consumableRows, hppPackageRows, categoryRows] = await Promise.all([
+  const [settingsRows, treatmentRows, productRows, simulationRows, logRows, consumableRows, hppPackageRows, categoryRows, adjustmentRows, opnameRows] = await Promise.all([
     db.select().from(fixedCostSettings),
     db.select().from(treatments),
     db.select().from(products),
@@ -347,6 +402,8 @@ export async function getAppData(): Promise<StorageSchema> {
     db.select().from(consumableItems),
     db.select().from(hppPackageTemplates),
     db.select().from(hppCategories),
+    db.select().from(stockAdjustments),
+    db.select().from(stockOpnames),
   ]);
 
   return {
@@ -356,6 +413,8 @@ export async function getAppData(): Promise<StorageSchema> {
     simulations: simulationRows.map(simulationFromDb),
     commissionLogs: logRows.map(logFromDb),
     consumables: consumableRows.map(consumableFromDb),
+    stockAdjustments: adjustmentRows.map(stockAdjustmentFromDb),
+    stockOpnames: opnameRows.map(stockOpnameFromDb),
     hppPackages: hppPackageRows.map(hppPackageFromDb),
     categories: categoryRows.map(categoryFromDb),
   };
@@ -368,6 +427,8 @@ export async function replaceAppData(data: StorageSchema) {
   await db.delete(products);
   await db.delete(simulationRecords);
   await db.delete(commissionLogs);
+  await db.delete(stockAdjustments);
+  await db.delete(stockOpnames);
   await db.delete(consumableItems);
   await db.delete(hppPackageTemplates);
   await db.delete(hppCategories);
@@ -378,6 +439,8 @@ export async function replaceAppData(data: StorageSchema) {
   if (data.simulations.length) await db.insert(simulationRecords).values(data.simulations.map(simulationToDb));
   if (data.commissionLogs.length) await db.insert(commissionLogs).values(data.commissionLogs.map(logToDb));
   if (data.consumables.length) await db.insert(consumableItems).values(data.consumables.map(consumableToDb));
+  if (data.stockAdjustments.length) await db.insert(stockAdjustments).values(data.stockAdjustments.map(stockAdjustmentToDb));
+  if (data.stockOpnames.length) await db.insert(stockOpnames).values(data.stockOpnames.map(stockOpnameToDb));
   if (data.hppPackages.length) await db.insert(hppPackageTemplates).values(data.hppPackages.map(hppPackageToDb));
   if (data.categories.length) await db.insert(hppCategories).values(data.categories.map(categoryToDb));
 }

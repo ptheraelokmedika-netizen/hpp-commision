@@ -123,7 +123,41 @@ export const consumableItems = pgTable("consumable_items", {
   costPerSmallestUnit: integer("cost_per_smallest_unit").notNull().default(0),
   availableQuantity: integer("available_quantity").notNull().default(0),
   minimumStock: integer("minimum_stock").notNull().default(0),
+  currentStock: integer("current_stock").notNull().default(0),
+  stockUnit: text("stock_unit").notNull().default("pcs"),
+  lastStockCheckDate: text("last_stock_check_date"),
+  lastStockCheckBy: text("last_stock_check_by"),
+  lastPhysicalStock: integer("last_physical_stock"),
+  lastStockDifference: integer("last_stock_difference"),
   notes: text("notes"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const stockAdjustments = pgTable("hpp_stock_adjustments", {
+  id: text("id").primaryKey(),
+  materialId: text("material_id").notNull(),
+  materialNameSnapshot: text("material_name_snapshot").notNull(),
+  type: text("type").notNull(),
+  quantity: integer("quantity").notNull().default(0),
+  previousStock: integer("previous_stock").notNull().default(0),
+  newStock: integer("new_stock").notNull().default(0),
+  reason: text("reason").notNull(),
+  notes: text("notes"),
+  date: text("date").notNull(),
+  pic: text("pic").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const stockOpnames = pgTable("hpp_stock_opnames", {
+  id: text("id").primaryKey(),
+  date: text("date").notNull(),
+  checkedBy: text("checked_by").notNull().default(""),
+  location: text("location"),
+  notes: text("notes"),
+  status: text("status").notNull().default("draft"),
+  items: jsonb("items").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

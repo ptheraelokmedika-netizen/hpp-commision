@@ -62,6 +62,9 @@ import type {
   SimulationRecord,
   StaffRole,
   StorageSchema,
+  StockAdjustment,
+  StockOpname,
+  StockOpnameItem,
   Treatment,
   TreatmentConsumableUsage,
   TreatmentCostItem,
@@ -193,6 +196,7 @@ function emptyProduct(): Product {
 }
 
 function emptyConsumable(): ConsumableItem {
+  const today = new Date().toISOString().slice(0, 10);
   return {
     id: generateId("cons"),
     name: "",
@@ -206,7 +210,16 @@ function emptyConsumable(): ConsumableItem {
     costPerSmallestUnit: 0,
     availableQuantity: 1,
     minimumStock: 0,
+    currentStock: 1,
+    stockUnit: "pcs",
+    lastStockCheckDate: "",
+    lastStockCheckBy: "",
+    lastPhysicalStock: undefined,
+    lastStockDifference: undefined,
     notes: "",
+    active: true,
+    createdAt: today,
+    updatedAt: today,
   };
 }
 
@@ -240,14 +253,29 @@ function normalizeConsumable(item: ConsumableItem): ConsumableItem {
   const totalSmallestUnit = Math.max(Number(item.totalSmallestUnit) || 0, 0);
   const purchaseQuantity = Math.max(Number(item.purchaseQuantity) || 0, 0);
   const costPerSmallestUnit = totalSmallestUnit > 0 ? Math.round(item.purchasePrice / totalSmallestUnit) : 0;
+  const currentStock = Number(item.currentStock ?? item.availableQuantity ?? purchaseQuantity * totalSmallestUnit) || 0;
+  const today = new Date().toISOString().slice(0, 10);
   return {
     ...item,
     purchaseQuantity,
     totalSmallestUnit,
     costPerSmallestUnit,
-    availableQuantity: item.availableQuantity || purchaseQuantity * totalSmallestUnit,
+    currentStock,
+    availableQuantity: currentStock,
+    stockUnit: item.stockUnit ?? item.smallestUnit,
     minimumStock: Number(item.minimumStock) || 0,
+    active: item.active ?? true,
+    createdAt: item.createdAt ?? today,
+    updatedAt: today,
   };
+}
+
+function stockStatus(item: ConsumableItem) {
+  const currentStock = Number(item.currentStock ?? item.availableQuantity ?? 0);
+  if (!item.lastStockCheckDate) return "Belum dicek";
+  if (currentStock <= 0) return "Habis";
+  if (item.minimumStock > 0 && currentStock <= item.minimumStock) return "Low Stock";
+  return "Aman";
 }
 
 function normalCustomerType(type: CustomerType): CustomerType {
@@ -821,7 +849,13 @@ function FixedCostPage({ data, persist, addCategory }: { data: StorageSchema; pe
                   <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(staffCostTotal(staff))}</td>
                   <td className="p-2"><ModeSelect value={staff.mode} onChange={(mode) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, mode } : item) })} /></td>
                   <td className="p-2"><input className={inputClass()} value={staff.notes ?? ""} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, notes: event.target.value } : item) })} placeholder="Catatan" /></td>
-                  <td className="p-2"><ActionButton variant="danger" onClick={() => updateSettings({ ...settings, staffCosts: settings.staffCosts!.filter((item) => item.id !== staff.id) })}><Trash2 className="h-4 w-4" /></ActionButton></td>
+                  <td className="p-2">
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                      <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]" onClick={() => updateSettings({ ...settings, staffCosts: [...(settings.staffCosts ?? []), { ...staff, id: generateId("staff"), role: `${staff.role || "Staff"} Salinan` }] })}>Copy</button>
+                      <button type="button" className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]" onClick={() => window.confirm("Hapus item ini?") && updateSettings({ ...settings, staffCosts: settings.staffCosts!.filter((item) => item.id !== staff.id) })}>Hapus</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1116,32 +1150,64 @@ function ElectricitySettingsSection({
 
       <div className="mt-6 grid gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h4 className="font-semibold text-[#0d4b3a]">Biaya listrik per tindakan</h4>
+          <div>
+            <h4 className="font-semibold text-[#0d4b3a]">Biaya listrik per tindakan</h4>
+            <p className="mt-1 text-sm text-[#756b5d]">Hitung biaya listrik alat berdasarkan watt, durasi pemakaian, dan tarif listrik per kWh.</p>
+          </div>
           <ActionButton variant="ghost" onClick={() => updateElectricity({ devices: [...electricity.devices, { id: generateId("dev"), name: "Other device", watt: 0, quantity: 1, durationMinutes: 30, usagePerTreatment: 1, estimatedUsesPerMonth: 0, tariffPerKwh: electricity.tariffPerKwh, includeInTreatmentHpp: true, linkedTreatmentId: "", notes: "" }] })}><Plus className="h-4 w-4" /> Tambah alat listrik</ActionButton>
         </div>
-        {electricity.devices.map((device) => {
-          const cost = deviceElectricityCost(device);
-          return (
-            <div key={device.id} className="grid gap-2 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
-              <div className="grid gap-2 md:grid-cols-4">
-                <CategorySelect label="Device category" group="electricity-device" value={device.categoryId} fallbackName={device.name} categories={categories} addCategory={addCategory} onChange={(categoryId) => updateDevice(device.id, { categoryId })} />
-                <input className={inputClass()} value={device.name} onChange={(event) => updateDevice(device.id, { name: event.target.value })} placeholder="Device name" />
-                <input className={inputClass()} type="number" value={device.watt} onChange={(event) => updateDevice(device.id, { watt: Number(event.target.value) })} placeholder="Watt" />
-                <input className={inputClass()} type="number" value={device.quantity} onChange={(event) => updateDevice(device.id, { quantity: Number(event.target.value) })} placeholder="Quantity" />
-                <input className={inputClass()} type="number" value={device.durationMinutes} onChange={(event) => updateDevice(device.id, { durationMinutes: Number(event.target.value) })} placeholder="Duration per use in minutes" />
-                <input className={inputClass()} type="number" value={device.usagePerTreatment} onChange={(event) => updateDevice(device.id, { usagePerTreatment: Number(event.target.value) })} placeholder="Usage per treatment" />
-                <input className={inputClass()} type="number" value={device.estimatedUsesPerMonth} onChange={(event) => updateDevice(device.id, { estimatedUsesPerMonth: Number(event.target.value) })} placeholder="Estimated uses/month" />
-                <select className={inputClass()} value={device.linkedTreatmentId ?? ""} onChange={(event) => updateDevice(device.id, { linkedTreatmentId: event.target.value })}><option value="">Linked treatment optional</option>{treatments.map((treatment) => <option key={treatment.id} value={treatment.id}>{treatment.name}</option>)}</select>
-                <label className="flex items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 text-sm"><input type="checkbox" checked={device.includeInTreatmentHpp} onChange={(event) => updateDevice(device.id, { includeInTreatmentHpp: event.target.checked })} /> Include in treatment HPP?</label>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <MiniMetric label="kWh per use" value={cost.kwhPerUse.toFixed(3)} />
-                <MiniMetric label="Rp per use" value={rupiah(cost.costPerUse)} />
-                <MiniMetric label="Rp per month estimate" value={rupiah(cost.monthlyCost)} />
-              </div>
-            </div>
-          );
-        })}
+        {electricity.devices.length === 0 ? <EmptyState text="Belum ada alat listrik per tindakan." /> : (
+          <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+            <table className="w-full min-w-[1480px] text-sm">
+              <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+                <tr>
+                  {["Kategori alat", "Nama alat", "Watt alat", "Jumlah alat", "Durasi pakai / tindakan (menit)", "Est. tindakan / bulan", "Tarif listrik / kWh", "Link treatment", "Masuk HPP?", "kWh / tindakan", "Rp / tindakan", "Rp / bulan", "Aksi"].map((head) => <th key={head} className="p-2 align-bottom">{head}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {electricity.devices.map((device) => {
+                  const cost = deviceElectricityCost(device);
+                  return (
+                    <tr key={device.id} className="border-t border-[#efe4d2] align-top">
+                      <td className="p-2"><CategorySelect label="" group="electricity-device" value={device.categoryId} fallbackName={device.name} categories={categories} addCategory={addCategory} onChange={(categoryId) => updateDevice(device.id, { categoryId })} /></td>
+                      <td className="p-2"><input className={inputClass()} value={device.name} onChange={(event) => updateDevice(device.id, { name: event.target.value })} placeholder="Nama alat" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={device.watt} onChange={(event) => updateDevice(device.id, { watt: Number(event.target.value) })} placeholder="Watt alat, contoh 1200" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={device.quantity} onChange={(event) => updateDevice(device.id, { quantity: Number(event.target.value) })} placeholder="Jumlah, contoh 1" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={device.durationMinutes} onChange={(event) => updateDevice(device.id, { durationMinutes: Number(event.target.value) })} placeholder="Menit, contoh 20" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={device.estimatedUsesPerMonth} onChange={(event) => updateDevice(device.id, { estimatedUsesPerMonth: Number(event.target.value) })} placeholder="Tindakan/bulan, contoh 40" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={device.tariffPerKwh} onChange={(event) => updateDevice(device.id, { tariffPerKwh: Number(event.target.value) })} placeholder="Tarif/kWh, contoh 1444.7" /></td>
+                      <td className="p-2"><select className={inputClass()} value={device.linkedTreatmentId ?? ""} onChange={(event) => updateDevice(device.id, { linkedTreatmentId: event.target.value })}><option value="">Tidak di-link</option>{treatments.map((treatment) => <option key={treatment.id} value={treatment.id}>{treatment.name}</option>)}</select></td>
+                      <td className="p-2 text-center"><input type="checkbox" checked={device.includeInTreatmentHpp} onChange={(event) => updateDevice(device.id, { includeInTreatmentHpp: event.target.checked })} /></td>
+                      <td className="p-2 font-medium">{cost.kwhPerUse.toFixed(3)}</td>
+                      <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(cost.costPerUse)}</td>
+                      <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(cost.monthlyCost)}</td>
+                      <td className="p-2">
+                        <div className="flex flex-wrap gap-1">
+                          <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]"
+                            onClick={() => updateElectricity({ devices: [...electricity.devices, { ...device, id: generateId("dev"), name: `${device.name || "Alat"} Salinan` }] })}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]"
+                            onClick={() => window.confirm("Hapus item ini?\n\nData yang sudah dipakai di laporan lama tidak akan ikut berubah jika sudah disimpan sebagai snapshot.") && updateElectricity({ devices: electricity.devices.filter((item) => item.id !== device.id) })}
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="text-xs leading-5 text-[#756b5d]">Formula: Watt x Jumlah x Durasi menit / 60 / 1000 x Tarif/kWh</p>
       </div>
 
       <div className="mt-6 grid gap-4">
@@ -1149,30 +1215,44 @@ function ElectricitySettingsSection({
           <h4 className="font-semibold text-[#0d4b3a]">Biaya listrik bulanan AC</h4>
           <ActionButton variant="ghost" onClick={() => updateElectricity({ acItems: [...electricity.acItems, { id: generateId("ac"), name: "Other", pkOption: "1 PK", watt: 900, quantity: 1, hoursPerDay: 8, daysPerMonth: 26, efficiencyFactor: 1, tariffPerKwh: electricity.tariffPerKwh, mode: "hpp" }] })}><Plus className="h-4 w-4" /> Tambah AC</ActionButton>
         </div>
-        {electricity.acItems.map((ac) => {
-          const cost = acElectricityCost(ac);
-          return (
-            <div key={ac.id} className="grid gap-2 rounded-lg border border-[#eadfce] bg-white p-3">
-              <div className="grid gap-2 md:grid-cols-4">
-                <CategorySelect label="Room category" group="ac-room" value={ac.categoryId} fallbackName={ac.name} categories={categories} addCategory={addCategory} onChange={(categoryId) => updateAc(ac.id, { categoryId })} />
-                <input className={inputClass()} value={ac.name} onChange={(event) => updateAc(ac.id, { name: event.target.value })} placeholder="AC name / room" />
-                <select className={inputClass()} value={ac.pkOption} onChange={(event) => updateAc(ac.id, { pkOption: event.target.value as ElectricityAcItem["pkOption"] })}>{["1/2 PK", "3/4 PK", "1 PK", "1.5 PK", "2 PK", "custom"].map((pk) => <option key={pk}>{pk}</option>)}</select>
-                <input className={inputClass()} type="number" value={ac.watt} onChange={(event) => updateAc(ac.id, { watt: Number(event.target.value) })} placeholder="Watt" />
-                <input className={inputClass()} type="number" value={ac.quantity} onChange={(event) => updateAc(ac.id, { quantity: Number(event.target.value) })} placeholder="Quantity" />
-                <input className={inputClass()} type="number" value={ac.hoursPerDay} onChange={(event) => updateAc(ac.id, { hoursPerDay: Number(event.target.value) })} placeholder="Hours per day" />
-                <input className={inputClass()} type="number" value={ac.daysPerMonth} onChange={(event) => updateAc(ac.id, { daysPerMonth: Number(event.target.value) })} placeholder="Days per month" />
-                <input className={inputClass()} type="number" value={ac.efficiencyFactor} onChange={(event) => updateAc(ac.id, { efficiencyFactor: Number(event.target.value) })} placeholder="Efficiency factor" />
-                <ModeSelect value={ac.mode} onChange={(mode) => updateAc(ac.id, { mode })} />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-4">
-                <MiniMetric label="Total AC kWh/month" value={cost.monthlyKwh.toFixed(2)} />
-                <MiniMetric label="Total AC cost/month" value={rupiah(cost.monthlyCost)} />
-                <MiniMetric label="Cost per operational day" value={rupiah(cost.monthlyCost / Math.max(settings.workingDays, 1))} />
-                <MiniMetric label="Cost per estimated customer" value={rupiah(cost.monthlyCost / Math.max(settings.averageCustomers, 1))} />
-              </div>
-            </div>
-          );
-        })}
+        {electricity.acItems.length === 0 ? <EmptyState text="Belum ada data AC." /> : (
+          <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+            <table className="w-full min-w-[1500px] text-sm">
+              <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+                <tr>{["Room category", "Room name", "PK", "Watt", "Jumlah AC", "Jam pakai / hari", "Hari pakai / bulan", "Faktor efisiensi", "Mode", "Total kWh / bulan", "Total Rp / bulan", "Cost per operational day", "Cost per estimated customer", "Aksi"].map((head) => <th key={head} className="p-2">{head}</th>)}</tr>
+              </thead>
+              <tbody>
+                {electricity.acItems.map((ac) => {
+                  const cost = acElectricityCost(ac);
+                  return (
+                    <tr key={ac.id} className="border-t border-[#efe4d2] align-top">
+                      <td className="p-2"><CategorySelect label="" group="ac-room" value={ac.categoryId} fallbackName={ac.name} categories={categories} addCategory={addCategory} onChange={(categoryId) => updateAc(ac.id, { categoryId })} /></td>
+                      <td className="p-2"><input className={inputClass()} value={ac.name} onChange={(event) => updateAc(ac.id, { name: event.target.value })} placeholder="Nama ruangan" /></td>
+                      <td className="p-2"><select className={inputClass()} value={ac.pkOption} onChange={(event) => updateAc(ac.id, { pkOption: event.target.value as ElectricityAcItem["pkOption"] })}>{["1/2 PK", "3/4 PK", "1 PK", "1.5 PK", "2 PK", "custom"].map((pk) => <option key={pk}>{pk}</option>)}</select></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={ac.watt} onChange={(event) => updateAc(ac.id, { watt: Number(event.target.value) })} placeholder="Watt" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={ac.quantity} onChange={(event) => updateAc(ac.id, { quantity: Number(event.target.value) })} placeholder="Jumlah AC" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={ac.hoursPerDay} onChange={(event) => updateAc(ac.id, { hoursPerDay: Number(event.target.value) })} placeholder="Jam pakai / hari" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={ac.daysPerMonth} onChange={(event) => updateAc(ac.id, { daysPerMonth: Number(event.target.value) })} placeholder="Hari pakai / bulan" /></td>
+                      <td className="p-2"><input className={inputClass()} type="number" value={ac.efficiencyFactor} onChange={(event) => updateAc(ac.id, { efficiencyFactor: Number(event.target.value) })} placeholder="Faktor efisiensi" /></td>
+                      <td className="p-2"><ModeSelect value={ac.mode} onChange={(mode) => updateAc(ac.id, { mode })} /></td>
+                      <td className="p-2 font-medium">{cost.monthlyKwh.toFixed(2)}</td>
+                      <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(cost.monthlyCost)}</td>
+                      <td className="p-2">{rupiah(cost.monthlyCost / Math.max(settings.workingDays, 1))}</td>
+                      <td className="p-2">{rupiah(cost.monthlyCost / Math.max(settings.averageCustomers, 1))}</td>
+                      <td className="p-2">
+                        <div className="flex flex-wrap gap-1">
+                          <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                          <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]" onClick={() => updateElectricity({ acItems: [...electricity.acItems, { ...ac, id: generateId("ac"), name: `${ac.name || "AC"} Salinan` }] })}>Copy</button>
+                          <button type="button" className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]" onClick={() => window.confirm("Hapus item ini?\n\nData yang sudah dipakai di laporan lama tidak akan ikut berubah jika sudah disimpan sebagai snapshot.") && updateElectricity({ acItems: electricity.acItems.filter((item) => item.id !== ac.id) })}>Hapus</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -1351,13 +1431,15 @@ function DynamicDisposableSection({ treatment, updateTreatment, categories, addC
         </ActionButton>
       </div>
       {items.map((item) => (
-        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_44px]">
+        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_150px]">
           <CategorySelect label="Kategori" group="treatment-cost" value={item.categoryId} fallbackName="Consumables" categories={categories} addCategory={addCategory} onChange={(categoryId) => updateItem(item.id, { categoryId })} />
           <input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} placeholder="Nama item" className={inputClass()} />
           <input type="number" value={item.amount} onChange={(event) => updateItem(item.id, { amount: Number(event.target.value) })} placeholder="Biaya" className={inputClass()} />
-          <button type="button" onClick={() => updateTreatment({ ...treatment, disposableItems: items.filter((row) => row.id !== item.id) })} className="min-h-10 rounded-lg border border-[#e1aaa0] text-[#a33a2d]">
-            <Trash2 className="mx-auto h-4 w-4" />
-          </button>
+          <div className="flex flex-wrap items-center gap-1">
+            <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+            <button type="button" onClick={() => updateTreatment({ ...treatment, disposableItems: [...items, { ...item, id: generateId("cost"), name: `${item.name || "Item"} Salinan` }] })} className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Copy</button>
+            <button type="button" onClick={() => window.confirm("Hapus item ini?") && updateTreatment({ ...treatment, disposableItems: items.filter((row) => row.id !== item.id) })} className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]">Hapus</button>
+          </div>
         </div>
       ))}
     </div>
@@ -1526,6 +1608,11 @@ function DynamicConsumableUsageSection({
                 {consumables.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
               {usage.sourcePackageName && <span className="w-fit rounded-full bg-[#0d4b3a]/10 px-2 py-1 text-[11px] font-semibold text-[#0d4b3a]">Dari paket: {usage.sourcePackageName}</span>}
+              {selected && (
+                <span className={`text-xs ${stockStatus(selected) === "Low Stock" || stockStatus(selected) === "Habis" ? "text-[#a33a2d]" : "text-[#756b5d]"}`}>
+                  1x treatment memakai {usage.quantityUsed} {selected.stockUnit ?? selected.smallestUnit}. Stok sistem: {selected.currentStock ?? selected.availableQuantity} {selected.stockUnit ?? selected.smallestUnit}.
+                </span>
+              )}
             </div>
             <input type="number" value={usage.quantityUsed} onChange={(event) => updateUsage(usage.id, { quantityUsed: Number(event.target.value) })} className={inputClass()} placeholder="Qty terpakai" />
             <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-white px-3 text-sm">{selected?.smallestUnit ?? usage.unit}</div>
@@ -1554,15 +1641,17 @@ function DynamicMaterialSection({ treatment, updateTreatment, categories, addCat
       </div>
       {items.length === 0 && <EmptyState text="Belum ada material. Tambahkan serum khusus, anestesi, cartridge, atau produk lain." />}
       {items.map((item) => (
-        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_90px_140px_140px_44px]">
+        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_90px_140px_140px_150px]">
           <CategorySelect label="Kategori" group="material" value={item.categoryId} fallbackName="Skincare / Serum" categories={categories} addCategory={addCategory} onChange={(categoryId) => updateItem(item.id, { categoryId })} />
           <input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} placeholder="Nama material" className={inputClass()} />
           <input type="number" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Number(event.target.value) })} placeholder="Qty" className={inputClass()} />
           <input type="number" value={item.unitCost} onChange={(event) => updateItem(item.id, { unitCost: Number(event.target.value) })} placeholder="Unit cost" className={inputClass()} />
           <div className="flex min-h-10 items-center rounded-lg border border-[#eadfce] bg-[#fffaf2] px-3 text-sm font-semibold text-[#0d4b3a]">{rupiah(item.quantity * item.unitCost)}</div>
-          <button type="button" onClick={() => updateTreatment({ ...treatment, materialItems: items.filter((row) => row.id !== item.id) })} className="min-h-10 rounded-lg border border-[#e1aaa0] text-[#a33a2d]">
-            <Trash2 className="mx-auto h-4 w-4" />
-          </button>
+          <div className="flex flex-wrap items-center gap-1">
+            <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+            <button type="button" onClick={() => updateTreatment({ ...treatment, materialItems: [...items, { ...item, id: generateId("mat"), name: `${item.name || "Material"} Salinan` }] })} className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Copy</button>
+            <button type="button" onClick={() => window.confirm("Hapus item ini?") && updateTreatment({ ...treatment, materialItems: items.filter((row) => row.id !== item.id) })} className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]">Hapus</button>
+          </div>
         </div>
       ))}
     </div>
@@ -1582,13 +1671,15 @@ function DynamicMachineSection({ treatment, updateTreatment }: { treatment: Trea
       </div>
       {items.length === 0 && <EmptyState text="Belum ada alokasi alat / mesin." />}
       {items.map((item) => (
-        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_140px_minmax(0,1fr)_44px]">
+        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_140px_minmax(0,1fr)_150px]">
           <input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} placeholder="Nama alat" className={inputClass()} />
           <input type="number" value={item.amount} onChange={(event) => updateItem(item.id, { amount: Number(event.target.value) })} placeholder="Biaya" className={inputClass()} />
           <input value={item.notes ?? ""} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Notes optional" className={inputClass()} />
-          <button type="button" onClick={() => updateTreatment({ ...treatment, machineItems: items.filter((row) => row.id !== item.id) })} className="min-h-10 rounded-lg border border-[#e1aaa0] text-[#a33a2d]">
-            <Trash2 className="mx-auto h-4 w-4" />
-          </button>
+          <div className="flex flex-wrap items-center gap-1">
+            <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+            <button type="button" onClick={() => updateTreatment({ ...treatment, machineItems: [...items, { ...item, id: generateId("machine"), name: `${item.name || "Alat"} Salinan` }] })} className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Copy</button>
+            <button type="button" onClick={() => window.confirm("Hapus item ini?") && updateTreatment({ ...treatment, machineItems: items.filter((row) => row.id !== item.id) })} className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]">Hapus</button>
+          </div>
         </div>
       ))}
     </div>
@@ -1632,7 +1723,13 @@ function TreatmentDeviceElectricitySection({ treatment, updateTreatment, default
                   <td className="p-2 font-medium">{item.kwhPerTreatment.toFixed(4)}</td>
                   <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(item.costPerTreatment)}</td>
                   <td className="p-2 text-center"><input type="checkbox" checked={item.includeInHpp} onChange={(event) => updateItem(item.id, { includeInHpp: event.target.checked })} /></td>
-                  <td className="p-2"><ActionButton variant="danger" onClick={() => updateTreatment({ ...treatment, deviceElectricityCosts: items.filter((row) => row.id !== item.id) })}><Trash2 className="h-4 w-4" /></ActionButton></td>
+                  <td className="p-2">
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                      <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]" onClick={() => updateTreatment({ ...treatment, deviceElectricityCosts: [...items, { ...item, id: generateId("devhpp"), deviceName: `${item.deviceName || "Device"} Salinan` }] })}>Copy</button>
+                      <button type="button" className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]" onClick={() => window.confirm("Hapus item ini?") && updateTreatment({ ...treatment, deviceElectricityCosts: items.filter((row) => row.id !== item.id) })}>Hapus</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1680,7 +1777,13 @@ function TreatmentShotCartridgeSection({ treatment, updateTreatment }: { treatme
                   <td className="p-2"><input type="number" value={item.usedPerTreatment} onChange={(event) => updateItem(item.id, { usedPerTreatment: Number(event.target.value) })} placeholder="Dipakai" className={inputClass()} /></td>
                   <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(item.costPerTreatment)}</td>
                   <td className="p-2 text-center"><input type="checkbox" checked={item.includeInHpp} onChange={(event) => updateItem(item.id, { includeInHpp: event.target.checked })} /></td>
-                  <td className="p-2"><ActionButton variant="danger" onClick={() => updateTreatment({ ...treatment, shotCartridgeCosts: items.filter((row) => row.id !== item.id) })}><Trash2 className="h-4 w-4" /></ActionButton></td>
+                  <td className="p-2">
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                      <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]" onClick={() => updateTreatment({ ...treatment, shotCartridgeCosts: [...items, { ...item, id: generateId("shot"), cartridgeName: `${item.cartridgeName || "Cartridge"} Salinan` }] })}>Copy</button>
+                      <button type="button" className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]" onClick={() => window.confirm("Hapus item ini?") && updateTreatment({ ...treatment, shotCartridgeCosts: items.filter((row) => row.id !== item.id) })}>Hapus</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1723,7 +1826,13 @@ function TreatmentStaffFeeSection({ treatment, updateTreatment, basePrice }: { t
                   <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(item.total)}</td>
                   <td className="p-2 text-center"><input type="checkbox" checked={item.includeInHpp} onChange={(event) => updateItem(item.id, { includeInHpp: event.target.checked })} /></td>
                   <td className="p-2"><input value={item.notes ?? ""} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Catatan" className={inputClass()} /></td>
-                  <td className="p-2"><ActionButton variant="danger" onClick={() => updateTreatment({ ...treatment, staffFeeCosts: items.filter((row) => row.id !== item.id) })}><Trash2 className="h-4 w-4" /></ActionButton></td>
+                  <td className="p-2">
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                      <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]" onClick={() => updateTreatment({ ...treatment, staffFeeCosts: [...items, { ...item, id: generateId("fee"), role: `${item.role || "Role"} Salinan` }] })}>Copy</button>
+                      <button type="button" className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]" onClick={() => window.confirm("Hapus item ini?") && updateTreatment({ ...treatment, staffFeeCosts: items.filter((row) => row.id !== item.id) })}>Hapus</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1948,24 +2057,129 @@ function ConsumablesPage({
   addCategory: (group: CategoryGroup, name: string, notes?: string) => string;
 }) {
   const draft = normalizeConsumable(editingConsumable);
-  const lowStockCount = (data.consumables ?? []).filter((item) => item.minimumStock > 0 && item.availableQuantity <= item.minimumStock).length;
-  const inventoryValue = (data.consumables ?? []).reduce((sum, item) => sum + item.availableQuantity * item.costPerSmallestUnit, 0);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("Semua");
+  const [statusFilter, setStatusFilter] = useState("Semua");
+  const [supplierFilter, setSupplierFilter] = useState("Semua");
+  const [adjustingItem, setAdjustingItem] = useState<ConsumableItem | null>(null);
+  const [adjustType, setAdjustType] = useState<StockAdjustment["type"]>("Tambah stok");
+  const [adjustQty, setAdjustQty] = useState(0);
+  const [adjustReason, setAdjustReason] = useState<StockAdjustment["reason"]>("Pembelian");
+  const [adjustNotes, setAdjustNotes] = useState("");
+  const [adjustDate, setAdjustDate] = useState(new Date().toISOString().slice(0, 10));
+  const [adjustPic, setAdjustPic] = useState("");
+  const [opname, setOpname] = useState<StockOpname>(() => createStockOpname(data.consumables));
+  const activeConsumables = (data.consumables ?? []).filter((item) => item.active !== false);
+  const lowStockCount = activeConsumables.filter((item) => Number(item.currentStock ?? item.availableQuantity ?? 0) > 0 && item.minimumStock > 0 && Number(item.currentStock ?? item.availableQuantity ?? 0) <= item.minimumStock).length;
+  const emptyStockCount = activeConsumables.filter((item) => Number(item.currentStock ?? item.availableQuantity ?? 0) <= 0).length;
+  const inventoryValue = activeConsumables.reduce((sum, item) => sum + Number(item.currentStock ?? item.availableQuantity ?? 0) * item.costPerSmallestUnit, 0);
+  const lastOpname = data.stockOpnames?.[0];
+  const categories = Array.from(new Set(activeConsumables.map((item) => item.category).filter(Boolean)));
+  const suppliers = Array.from(new Set(activeConsumables.map((item) => item.supplier || "Tanpa supplier")));
+  const filteredConsumables = activeConsumables.filter((item) => {
+    const status = stockStatus(item);
+    return item.name.toLowerCase().includes(search.toLowerCase()) &&
+      (categoryFilter === "Semua" || item.category === categoryFilter) &&
+      (statusFilter === "Semua" || status === statusFilter) &&
+      (supplierFilter === "Semua" || (item.supplier || "Tanpa supplier") === supplierFilter);
+  });
 
   const saveConsumable = () => {
     if (!draft.name.trim()) return;
+    const synced = normalizeConsumable({ ...draft, stockUnit: draft.stockUnit ?? draft.smallestUnit });
     const exists = data.consumables.some((item) => item.id === draft.id);
     persist({
       ...data,
-      consumables: exists ? data.consumables.map((item) => (item.id === draft.id ? draft : item)) : [draft, ...data.consumables],
+      consumables: exists ? data.consumables.map((item) => (item.id === synced.id ? synced : item)) : [synced, ...data.consumables],
     });
     setEditingConsumable(emptyConsumable());
   };
   const deleteConsumable = (id: string) => {
     if (window.confirm("Hapus bahan ini dari master?")) persist({ ...data, consumables: data.consumables.filter((item) => item.id !== id) });
   };
+  const duplicateConsumable = (item: ConsumableItem) => {
+    persist({ ...data, consumables: [{ ...item, id: generateId("cons"), name: `${item.name} Salinan`, createdAt: new Date().toISOString().slice(0, 10), updatedAt: new Date().toISOString().slice(0, 10) }, ...data.consumables] });
+  };
+  const deactivateConsumable = (id: string) => {
+    persist({ ...data, consumables: data.consumables.map((item) => item.id === id ? { ...item, active: false, updatedAt: new Date().toISOString().slice(0, 10) } : item) });
+  };
+  const openAdjustment = (item: ConsumableItem) => {
+    setAdjustingItem(item);
+    setAdjustType("Tambah stok");
+    setAdjustQty(0);
+    setAdjustReason("Pembelian");
+    setAdjustNotes("");
+    setAdjustDate(new Date().toISOString().slice(0, 10));
+  };
+  const applyAdjustment = () => {
+    if (!adjustingItem) return;
+    const previousStock = Number(adjustingItem.currentStock ?? adjustingItem.availableQuantity ?? 0);
+    let newStock = adjustType === "Tambah stok" ? previousStock + adjustQty : adjustType === "Kurangi stok" ? previousStock - adjustQty : adjustQty;
+    if (newStock < 0 && !window.confirm("Stok akan menjadi negatif. Lanjutkan?")) return;
+    const now = new Date().toISOString();
+    const adjustment: StockAdjustment = {
+      id: generateId("adj"),
+      materialId: adjustingItem.id,
+      materialNameSnapshot: adjustingItem.name,
+      type: adjustType,
+      quantity: adjustQty,
+      previousStock,
+      newStock,
+      reason: adjustReason,
+      notes: adjustNotes,
+      date: adjustDate,
+      pic: adjustPic,
+      createdAt: now,
+    };
+    persist({
+      ...data,
+      consumables: data.consumables.map((item) => item.id === adjustingItem.id ? { ...item, currentStock: newStock, availableQuantity: newStock, updatedAt: now.slice(0, 10) } : item),
+      stockAdjustments: [adjustment, ...(data.stockAdjustments ?? [])],
+    });
+    setAdjustingItem(null);
+  };
+  const saveOpname = (status: StockOpname["status"], applyToStock = false) => {
+    const now = new Date().toISOString();
+    const normalizedItems = opname.items.map((item) => {
+      const difference = item.physicalStock == null ? 0 : item.physicalStock - item.systemStock;
+      const statusItem = item.physicalStock == null ? "Belum diisi" : difference === 0 ? "Sesuai" : difference < 0 ? "Selisih kurang" : "Selisih lebih";
+      return { ...item, difference, status: statusItem as StockOpnameItem["status"] };
+    });
+    const saved: StockOpname = { ...opname, id: opname.id || generateId("opname"), status, items: normalizedItems, updatedAt: now, createdAt: opname.createdAt || now };
+    const nextConsumables = applyToStock
+      ? data.consumables.map((material) => {
+          const row = normalizedItems.find((item) => item.materialId === material.id && item.physicalStock != null);
+          return row ? { ...material, currentStock: row.physicalStock!, availableQuantity: row.physicalStock!, lastStockCheckDate: saved.date, lastStockCheckBy: saved.checkedBy, lastPhysicalStock: row.physicalStock, lastStockDifference: row.difference, updatedAt: now.slice(0, 10) } : material;
+        })
+      : data.consumables.map((material) => {
+          const row = normalizedItems.find((item) => item.materialId === material.id && item.physicalStock != null);
+          return row ? { ...material, lastStockCheckDate: saved.date, lastStockCheckBy: saved.checkedBy, lastPhysicalStock: row.physicalStock, lastStockDifference: row.difference, updatedAt: now.slice(0, 10) } : material;
+        });
+    persist({
+      ...data,
+      consumables: nextConsumables,
+      stockOpnames: [saved, ...(data.stockOpnames ?? []).filter((item) => item.id !== saved.id)],
+    });
+    setOpname(createStockOpname(nextConsumables));
+  };
+  const applyOpname = () => {
+    if (window.confirm("Stok sistem akan disesuaikan dengan stok fisik. Lanjutkan?")) saveOpname("applied", true);
+  };
+  const printStockList = () => {
+    window.setTimeout(() => window.print(), 50);
+  };
+  const printOpname = () => {
+    saveOpname("finalized", false);
+    window.setTimeout(() => window.print(), 50);
+  };
 
   return (
-    <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
+    <div className="grid min-w-0 gap-6">
+      <div className="stock-print-area">
+        <StockListPrint consumables={filteredConsumables} />
+        <StockOpnamePrint opname={opname} consumables={data.consumables} />
+      </div>
+      <div className="no-print grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
       <Card>
         <h3 className="text-lg font-semibold text-[#0d4b3a]">Master Bahan</h3>
         <p className="mt-2 text-sm leading-6 text-[#756b5d]">
@@ -1986,12 +2200,16 @@ function ConsumablesPage({
               {consumableUnits.map((unit) => <option key={unit}>{unit}</option>)}
             </SelectField>
             <Field label="Stok minimum" type="number" value={draft.minimumStock} onChange={(value) => setEditingConsumable({ ...draft, minimumStock: Number(value) })} />
+            <Field label="Stok sistem / internal" type="number" value={draft.currentStock ?? draft.availableQuantity ?? 0} onChange={(value) => setEditingConsumable({ ...draft, currentStock: Number(value), availableQuantity: Number(value) })} />
+            <SelectField label="Unit stok" value={draft.stockUnit ?? draft.smallestUnit} onChange={(value) => setEditingConsumable({ ...draft, stockUnit: value as ConsumableUnit })}>
+              {consumableUnits.map((unit) => <option key={unit}>{unit}</option>)}
+            </SelectField>
             <Field label="Notes" value={draft.notes ?? ""} onChange={(value) => setEditingConsumable({ ...draft, notes: value })} />
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <StatCard label="Biaya per unit" value={rupiah(draft.costPerSmallestUnit)} />
-            <StatCard label="Stok tersedia" value={`${draft.availableQuantity} ${draft.smallestUnit}`} />
-            <StatCard label="Nilai stok" value={rupiah(draft.availableQuantity * draft.costPerSmallestUnit)} tone="gold" />
+            <StatCard label="Stok sistem" value={`${draft.currentStock ?? draft.availableQuantity} ${draft.stockUnit ?? draft.smallestUnit}`} />
+            <StatCard label="Nilai stok" value={rupiah((draft.currentStock ?? draft.availableQuantity) * draft.costPerSmallestUnit)} tone="gold" />
           </div>
           <div className="flex flex-wrap gap-2">
             <ActionButton onClick={saveConsumable}><Save className="h-4 w-4" /> Simpan bahan</ActionButton>
@@ -2001,21 +2219,32 @@ function ConsumablesPage({
       </Card>
 
       <div className="grid min-w-0 gap-6">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Jumlah master bahan" value={`${data.consumables.length} bahan`} />
           <StatCard label="Bahan low stock" value={`${lowStockCount} bahan`} tone={lowStockCount ? "rose" : "emerald"} />
+          <StatCard label="Bahan habis" value={`${emptyStockCount} bahan`} tone={emptyStockCount ? "rose" : "emerald"} />
           <StatCard label="Estimasi nilai stok bahan" value={rupiah(inventoryValue)} tone="gold" />
+          <StatCard label="Terakhir stock opname" value={lastOpname ? `${lastOpname.date} / ${lastOpname.status}` : "-"} />
         </div>
         <Card>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-lg font-semibold text-[#0d4b3a]">Daftar Master Bahan</h3>
-            <ActionButton variant="secondary" onClick={() => consumableStockReport(data.consumables)}><FileDown className="h-4 w-4" /> PDF</ActionButton>
+            <h3 className="text-lg font-semibold text-[#0d4b3a]">Daftar Stok Bahan</h3>
+            <div className="flex flex-wrap gap-2">
+              <ActionButton variant="secondary" onClick={() => consumableStockReport(filteredConsumables)}><FileDown className="h-4 w-4" /> PDF</ActionButton>
+              <ActionButton variant="ghost" onClick={printStockList}>Print / PDF Daftar Stok</ActionButton>
+            </div>
+          </div>
+          <div className="mb-4 grid gap-3 md:grid-cols-4">
+            <Field label="Search bahan" value={search} onChange={setSearch} />
+            <SelectField label="Category" value={categoryFilter} onChange={setCategoryFilter}><option>Semua</option>{categories.map((item) => <option key={item}>{item}</option>)}</SelectField>
+            <SelectField label="Status stok" value={statusFilter} onChange={setStatusFilter}>{["Semua", "Aman", "Low Stock", "Habis", "Belum dicek"].map((item) => <option key={item}>{item}</option>)}</SelectField>
+            <SelectField label="Supplier" value={supplierFilter} onChange={setSupplierFilter}><option>Semua</option>{suppliers.map((item) => <option key={item}>{item}</option>)}</SelectField>
           </div>
           {data.consumables.length === 0 ? <EmptyState text="Belum ada master bahan." /> : (
             <>
               <div className="grid gap-3 md:hidden">
-                {data.consumables.map((item) => {
-                  const low = item.minimumStock > 0 && item.availableQuantity <= item.minimumStock;
+                {filteredConsumables.map((item) => {
+                  const status = stockStatus(item);
                   return (
                     <div key={`cons-mobile-${item.id}`} className="rounded-lg border border-[#eadfce] bg-[#fffaf2] p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -2023,40 +2252,46 @@ function ConsumablesPage({
                           <p className="font-semibold text-[#0d4b3a]">{item.name}</p>
                           <p className="text-xs text-[#7a7265]">{item.category} - {item.supplier || "Tanpa supplier"}</p>
                         </div>
-                        {low && <span className="rounded-full bg-[#fff2ef] px-2 py-1 text-xs font-semibold text-[#a33a2d]">Low stock</span>}
+                        <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">{status}</span>
                       </div>
                       <div className="mt-3 grid grid-cols-2 gap-2">
                         <MiniMetric label="Harga beli" value={rupiah(item.purchasePrice)} />
                         <MiniMetric label="Isi" value={`${item.totalSmallestUnit} ${item.smallestUnit}`} />
                         <MiniMetric label="Biaya per unit" value={rupiah(item.costPerSmallestUnit)} />
-                        <MiniMetric label="Stok tersedia" value={`${item.availableQuantity} ${item.smallestUnit}`} />
+                        <MiniMetric label="Stok sistem" value={`${item.currentStock ?? item.availableQuantity} ${item.stockUnit ?? item.smallestUnit}`} />
+                        <MiniMetric label="Stok fisik terakhir" value={item.lastPhysicalStock == null ? "-" : `${item.lastPhysicalStock} ${item.stockUnit ?? item.smallestUnit}`} />
                       </div>
                       <div className="mt-4 grid grid-cols-2 gap-2">
                         <ActionButton variant="ghost" onClick={() => setEditingConsumable(item)}>Edit</ActionButton>
-                        <ActionButton variant="danger" onClick={() => deleteConsumable(item.id)}><Trash2 className="h-4 w-4" /></ActionButton>
+                        <ActionButton variant="secondary" onClick={() => duplicateConsumable(item)}><Copy className="h-4 w-4" /></ActionButton>
+                        <ActionButton variant="secondary" onClick={() => openAdjustment(item)}>Adjust Stock</ActionButton>
+                        <ActionButton variant="danger" onClick={() => deactivateConsumable(item.id)}>Deactivate</ActionButton>
                       </div>
                     </div>
                   );
                 })}
               </div>
               <div className="hidden max-w-full overflow-x-auto md:block">
-                <table className="w-full min-w-[980px] text-sm">
+                <table className="w-full min-w-[1320px] text-sm">
                   <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
-                    <tr>{["Nama bahan", "Harga beli", "Isi", "Unit terkecil", "Biaya/unit", "Stok tersedia", "Low stock", "Aksi"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+                    <tr>{["Nama bahan", "Kategori", "Supplier", "Stok sistem", "Unit", "Stok minimum", "Status stok", "Stok fisik terakhir", "Selisih terakhir", "Terakhir dicek", "Action"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
                   </thead>
                   <tbody>
-                    {data.consumables.map((item) => {
-                      const low = item.minimumStock > 0 && item.availableQuantity <= item.minimumStock;
+                    {filteredConsumables.map((item) => {
+                      const status = stockStatus(item);
                       return (
                         <tr key={item.id} className="border-b border-[#efe4d2]">
                           <td className="p-3"><p className="font-semibold text-[#0d4b3a]">{item.name}</p><p className="text-xs text-[#7a7265]">{item.supplier || "-"}</p></td>
-                          <td className="p-3">{rupiah(item.purchasePrice)}</td>
-                          <td className="p-3">{item.totalSmallestUnit} {item.smallestUnit}</td>
-                          <td className="p-3">{item.smallestUnit}</td>
-                          <td className="p-3">{rupiah(item.costPerSmallestUnit)}</td>
-                          <td className="p-3">{item.availableQuantity} {item.smallestUnit}</td>
-                          <td className="p-3">{low ? "Low stock" : "Aman"}</td>
-                          <td className="p-3"><div className="flex gap-2"><ActionButton variant="ghost" onClick={() => setEditingConsumable(item)}>Edit</ActionButton><ActionButton variant="danger" onClick={() => deleteConsumable(item.id)}><Trash2 className="h-4 w-4" /></ActionButton></div></td>
+                          <td className="p-3">{item.category}</td>
+                          <td className="p-3">{item.supplier || "-"}</td>
+                          <td className="p-3 font-semibold text-[#0d4b3a]">{item.currentStock ?? item.availableQuantity}</td>
+                          <td className="p-3">{item.stockUnit ?? item.smallestUnit}</td>
+                          <td className="p-3">{item.minimumStock}</td>
+                          <td className="p-3">{status}</td>
+                          <td className="p-3">{item.lastPhysicalStock ?? "-"}</td>
+                          <td className="p-3">{item.lastStockDifference ?? "-"}</td>
+                          <td className="p-3">{item.lastStockCheckDate ?? "Belum dicek"}</td>
+                          <td className="p-3"><div className="flex flex-wrap gap-2"><ActionButton variant="ghost" onClick={() => setEditingConsumable(item)}>Edit</ActionButton><ActionButton variant="secondary" onClick={() => duplicateConsumable(item)}><Copy className="h-4 w-4" /></ActionButton><ActionButton variant="secondary" onClick={() => openAdjustment(item)}>Adjust Stock</ActionButton><ActionButton variant="danger" onClick={() => deactivateConsumable(item.id)}>Deactivate</ActionButton><ActionButton variant="danger" onClick={() => deleteConsumable(item.id)}>Delete</ActionButton></div></td>
                         </tr>
                       );
                     })}
@@ -2067,7 +2302,199 @@ function ConsumablesPage({
           )}
         </Card>
       </div>
+      </div>
+      <StockOpnameSection opname={opname} setOpname={setOpname} consumables={activeConsumables} saveDraft={() => saveOpname("draft", false)} finalize={() => saveOpname("finalized", false)} apply={applyOpname} print={printOpname} />
+      <AdjustmentHistory adjustments={data.stockAdjustments ?? []} />
+      {adjustingItem && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-xl rounded-lg border border-[#e8dcc8] bg-[#fffdf8] p-4 shadow-xl">
+            <h3 className="text-lg font-semibold text-[#0d4b3a]">Adjust Stock</h3>
+            <p className="mt-1 text-sm text-[#756b5d]">{adjustingItem.name} - stok saat ini {adjustingItem.currentStock ?? adjustingItem.availableQuantity} {adjustingItem.stockUnit ?? adjustingItem.smallestUnit}</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <SelectField label="Adjustment type" value={adjustType} onChange={(value) => setAdjustType(value as StockAdjustment["type"])}>{["Tambah stok", "Kurangi stok", "Set stok manual"].map((item) => <option key={item}>{item}</option>)}</SelectField>
+              <Field label="Quantity" type="number" value={adjustQty} onChange={(value) => setAdjustQty(Number(value))} />
+              <SelectField label="Reason" value={adjustReason} onChange={(value) => setAdjustReason(value as StockAdjustment["reason"])}>{["Pembelian", "Pemakaian", "Rusak", "Expired", "Sample", "Koreksi stok", "Lainnya"].map((item) => <option key={item}>{item}</option>)}</SelectField>
+              <Field label="Date" type="date" value={adjustDate} onChange={setAdjustDate} />
+              <Field label="Staff / PIC" value={adjustPic} onChange={setAdjustPic} />
+              <Field label="Notes" value={adjustNotes} onChange={setAdjustNotes} />
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <ActionButton variant="ghost" onClick={() => setAdjustingItem(null)}>Batal</ActionButton>
+              <ActionButton onClick={applyAdjustment}>Simpan adjustment</ActionButton>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function createStockOpname(consumables: ConsumableItem[]): StockOpname {
+  const now = new Date().toISOString();
+  return {
+    id: generateId("opname"),
+    date: now.slice(0, 10),
+    checkedBy: "",
+    location: "",
+    notes: "",
+    status: "draft",
+    createdAt: now,
+    updatedAt: now,
+    items: (consumables ?? []).filter((item) => item.active !== false).map((item) => ({
+      materialId: item.id,
+      materialNameSnapshot: item.name,
+      categorySnapshot: item.category,
+      systemStock: Number(item.currentStock ?? item.availableQuantity ?? 0),
+      physicalStock: undefined,
+      difference: 0,
+      unit: item.stockUnit ?? item.smallestUnit,
+      status: "Belum diisi",
+      notes: "",
+    })),
+  };
+}
+
+function StockOpnameSection({
+  opname,
+  setOpname,
+  consumables,
+  saveDraft,
+  finalize,
+  apply,
+  print,
+}: {
+  opname: StockOpname;
+  setOpname: (opname: StockOpname) => void;
+  consumables: ConsumableItem[];
+  saveDraft: () => void;
+  finalize: () => void;
+  apply: () => void;
+  print: () => void;
+}) {
+  useEffect(() => {
+    setOpname({ ...opname, items: createStockOpname(consumables).items });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consumables.length]);
+  const updateItem = (materialId: string, patch: Partial<StockOpnameItem>) => {
+    setOpname({
+      ...opname,
+      items: opname.items.map((item) => {
+        if (item.materialId !== materialId) return item;
+        const next = { ...item, ...patch };
+        const difference = next.physicalStock == null ? 0 : next.physicalStock - next.systemStock;
+        const status = next.physicalStock == null ? "Belum diisi" : difference === 0 ? "Sesuai" : difference < 0 ? "Selisih kurang" : "Selisih lebih";
+        return { ...next, difference, status: status as StockOpnameItem["status"] };
+      }),
+    });
+  };
+  return (
+    <Card className="no-print">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-lg font-semibold text-[#0d4b3a]">Stock Opname</h3>
+        <div className="flex flex-wrap gap-2">
+          <ActionButton variant="ghost" onClick={saveDraft}>Save Opname Draft</ActionButton>
+          <ActionButton variant="secondary" onClick={finalize}>Finalize Opname</ActionButton>
+          <ActionButton onClick={apply}>Apply Adjustment to System Stock</ActionButton>
+          <ActionButton variant="secondary" onClick={print}>Print / PDF Hasil Opname</ActionButton>
+        </div>
+      </div>
+      <div className="mb-4 grid gap-3 md:grid-cols-4">
+        <Field label="Opname date" type="date" value={opname.date} onChange={(value) => setOpname({ ...opname, date: value })} />
+        <Field label="Checked by / PIC" value={opname.checkedBy} onChange={(value) => setOpname({ ...opname, checkedBy: value })} />
+        <Field label="Location optional" value={opname.location ?? ""} onChange={(value) => setOpname({ ...opname, location: value })} />
+        <Field label="Notes" value={opname.notes ?? ""} onChange={(value) => setOpname({ ...opname, notes: value })} />
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+        <table className="w-full min-w-[1040px] text-sm">
+          <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+            <tr>{["Nama bahan", "Kategori", "Stok sistem", "Stok fisik", "Selisih", "Unit", "Status", "Catatan"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+          </thead>
+          <tbody>
+            {opname.items.map((item) => (
+              <tr key={item.materialId} className="border-b border-[#efe4d2]">
+                <td className="p-3 font-semibold text-[#0d4b3a]">{item.materialNameSnapshot}</td>
+                <td className="p-3">{item.categorySnapshot}</td>
+                <td className="p-3">{item.systemStock}</td>
+                <td className="p-3"><input className={inputClass()} type="number" value={item.physicalStock ?? ""} onChange={(event) => updateItem(item.materialId, { physicalStock: event.target.value === "" ? undefined : Number(event.target.value) })} placeholder="Stok fisik" /></td>
+                <td className="p-3">{item.physicalStock == null ? "-" : item.difference}</td>
+                <td className="p-3">{item.unit}</td>
+                <td className="p-3">{item.status}</td>
+                <td className="p-3"><input className={inputClass()} value={item.notes ?? ""} onChange={(event) => updateItem(item.materialId, { notes: event.target.value })} placeholder="Catatan" /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function AdjustmentHistory({ adjustments }: { adjustments: StockAdjustment[] }) {
+  return (
+    <Card className="no-print">
+      <h3 className="text-lg font-semibold text-[#0d4b3a]">Adjustment History</h3>
+      {adjustments.length === 0 ? <EmptyState text="Belum ada adjustment stock." /> : (
+        <div className="mt-4 overflow-x-auto rounded-lg border border-[#eadfce]">
+          <table className="w-full min-w-[920px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+              <tr>{["Tanggal", "Bahan", "Type", "Qty", "Stok sebelumnya", "Stok baru", "Reason", "PIC", "Notes"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {adjustments.map((item) => (
+                <tr key={item.id} className="border-b border-[#efe4d2]">
+                  <td className="p-3">{item.date}</td>
+                  <td className="p-3">{item.materialNameSnapshot}</td>
+                  <td className="p-3">{item.type}</td>
+                  <td className="p-3">{item.quantity}</td>
+                  <td className="p-3">{item.previousStock}</td>
+                  <td className="p-3">{item.newStock}</td>
+                  <td className="p-3">{item.reason}</td>
+                  <td className="p-3">{item.pic || "-"}</td>
+                  <td className="p-3">{item.notes || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function StockListPrint({ consumables }: { consumables: ConsumableItem[] }) {
+  return (
+    <section className="p-2 text-black">
+      <h1 className="text-xl font-bold">HERA CLINIC</h1>
+      <p>HPP & Commission Calculator</p>
+      <h2 className="mt-3 text-lg font-semibold">Daftar Stok Bahan</h2>
+      <p className="mb-4 text-sm">Date generated: {new Date().toLocaleDateString("id-ID")}</p>
+      <table className="w-full border-collapse text-xs">
+        <thead><tr>{["No", "Nama bahan", "Kategori", "Supplier", "Stok sistem", "Unit", "Stok minimum", "Stok fisik", "Selisih", "Catatan"].map((head) => <th key={head} className="border border-black p-1 text-left">{head}</th>)}</tr></thead>
+        <tbody>{consumables.map((item, index) => <tr key={item.id}><td className="border border-black p-1">{index + 1}</td><td className="border border-black p-1">{item.name}</td><td className="border border-black p-1">{item.category}</td><td className="border border-black p-1">{item.supplier || ""}</td><td className="border border-black p-1">{item.currentStock ?? item.availableQuantity}</td><td className="border border-black p-1">{item.stockUnit ?? item.smallestUnit}</td><td className="border border-black p-1">{item.minimumStock}</td><td className="border border-black p-1 h-7"></td><td className="border border-black p-1"></td><td className="border border-black p-1"></td></tr>)}</tbody>
+      </table>
+    </section>
+  );
+}
+
+function StockOpnamePrint({ opname, consumables }: { opname: StockOpname; consumables: ConsumableItem[] }) {
+  const rows = opname.items.length ? opname.items : createStockOpname(consumables).items;
+  const totalValueDiff = rows.reduce((sum, row) => {
+    const material = consumables.find((item) => item.id === row.materialId);
+    return sum + row.difference * (material?.costPerSmallestUnit ?? 0);
+  }, 0);
+  const count = (status: StockOpnameItem["status"]) => rows.filter((item) => item.status === status).length;
+  return (
+    <section className="mt-8 p-2 text-black">
+      <h1 className="text-xl font-bold">HERA CLINIC</h1>
+      <h2 className="mt-3 text-lg font-semibold">Hasil Stock Opname</h2>
+      <p className="text-sm">Date: {opname.date} | Checked by: {opname.checkedBy || "-"} | Location: {opname.location || "-"} | Status: {opname.status}</p>
+      <p className="my-3 text-sm">Total item: {rows.length} | Sesuai: {count("Sesuai")} | Selisih kurang: {count("Selisih kurang")} | Selisih lebih: {count("Selisih lebih")} | Belum diisi: {count("Belum diisi")} | Est. value diff: {rupiah(totalValueDiff)}</p>
+      <table className="w-full border-collapse text-xs">
+        <thead><tr>{["No", "Nama bahan", "Kategori", "Stok sistem", "Stok fisik", "Selisih", "Unit", "Status", "Catatan"].map((head) => <th key={head} className="border border-black p-1 text-left">{head}</th>)}</tr></thead>
+        <tbody>{rows.map((item, index) => <tr key={item.materialId}><td className="border border-black p-1">{index + 1}</td><td className="border border-black p-1">{item.materialNameSnapshot}</td><td className="border border-black p-1">{item.categorySnapshot}</td><td className="border border-black p-1">{item.systemStock}</td><td className="border border-black p-1">{item.physicalStock ?? ""}</td><td className="border border-black p-1">{item.physicalStock == null ? "" : item.difference}</td><td className="border border-black p-1">{item.unit}</td><td className="border border-black p-1">{item.status}</td><td className="border border-black p-1">{item.notes ?? ""}</td></tr>)}</tbody>
+      </table>
+      <div className="mt-12 grid grid-cols-2 gap-12 text-center text-sm"><div>Checked by<br /><br /><br />__________________</div><div>Supervisor/Admin<br /><br /><br />__________________</div></div>
+    </section>
   );
 }
 
@@ -2243,7 +2670,7 @@ function PackageItemEditor({
       {pkg.items.map((item) => (
         <div key={item.id} className="grid gap-2 rounded-lg border border-[#eadfce] bg-white p-3">
           {item.mode === "master" ? (
-            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_100px_130px_130px_44px]">
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_100px_130px_130px_150px]">
               <select
                 value={item.consumableItemId ?? ""}
                 onChange={(event) => {
@@ -2264,15 +2691,23 @@ function PackageItemEditor({
               <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-[#fffaf2] px-3 text-sm">{item.unit}</div>
               <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-[#fffaf2] px-3 text-sm">{rupiah(item.costPerUnit)}</div>
               <div className="flex min-h-11 items-center rounded-lg border border-[#eadfce] bg-[#fffaf2] px-3 text-sm font-semibold text-[#0d4b3a]">{rupiah(item.totalCost)}</div>
-              <button type="button" onClick={() => updateItems(pkg.items.filter((row) => row.id !== item.id))} className="min-h-11 rounded-lg border border-[#e1aaa0] text-[#a33a2d]"><Trash2 className="mx-auto h-4 w-4" /></button>
+              <div className="flex flex-wrap items-center gap-1">
+                <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                <button type="button" onClick={() => updateItems([...pkg.items, { ...item, id: generateId("pkgitem"), consumableName: `${item.consumableName || "Item"} Salinan` }])} className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Copy</button>
+                <button type="button" onClick={() => window.confirm("Hapus item ini?") && updateItems(pkg.items.filter((row) => row.id !== item.id))} className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]">Hapus</button>
+              </div>
             </div>
           ) : (
-            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_130px_minmax(0,1fr)_44px]">
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_130px_minmax(0,1fr)_150px]">
               <input value={item.manualName ?? ""} onChange={(event) => updateItem(item.id, { manualName: event.target.value, consumableName: event.target.value })} className={inputClass()} placeholder="Nama item manual" />
               <input type="number" value={item.manualCost ?? 0} onChange={(event) => updateItem(item.id, { manualCost: Number(event.target.value), totalCost: Number(event.target.value) })} className={inputClass()} placeholder="Default cost" />
               <select value={item.unit} onChange={(event) => updateItem(item.id, { unit: event.target.value as ConsumableUnit })} className={inputClass()}>{consumableUnits.map((unit) => <option key={unit}>{unit}</option>)}</select>
               <input value={item.notes ?? ""} onChange={(event) => updateItem(item.id, { notes: event.target.value })} className={inputClass()} placeholder="Notes optional" />
-              <button type="button" onClick={() => updateItems(pkg.items.filter((row) => row.id !== item.id))} className="min-h-11 rounded-lg border border-[#e1aaa0] text-[#a33a2d]"><Trash2 className="mx-auto h-4 w-4" /></button>
+              <div className="flex flex-wrap items-center gap-1">
+                <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                <button type="button" onClick={() => updateItems([...pkg.items, { ...item, id: generateId("pkgitem"), manualName: `${item.manualName || "Item"} Salinan`, consumableName: `${item.consumableName || "Item"} Salinan` }])} className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Copy</button>
+                <button type="button" onClick={() => window.confirm("Hapus item ini?") && updateItems(pkg.items.filter((row) => row.id !== item.id))} className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]">Hapus</button>
+              </div>
             </div>
           )}
         </div>
@@ -2320,11 +2755,15 @@ function ProductPage({ data, persist, editingProduct, setEditingProduct, addCate
               </ActionButton>
             </div>
             {productDraft.buyingTiers.map((tier) => (
-              <div key={tier.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[120px_minmax(0,1fr)_80px_44px]">
-                <input type="number" value={tier.quantity} onChange={(event) => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.map((item) => item.id === tier.id ? { ...item, quantity: Number(event.target.value) } : item) })} className={inputClass()} />
-                <input type="number" value={tier.unitCost} onChange={(event) => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.map((item) => item.id === tier.id ? { ...item, unitCost: Number(event.target.value) } : item) })} className={inputClass()} />
+              <div key={tier.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[120px_minmax(0,1fr)_80px_150px]">
+                <input type="number" value={tier.quantity} onChange={(event) => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.map((item) => item.id === tier.id ? { ...item, quantity: Number(event.target.value) } : item) })} className={inputClass()} placeholder="Jumlah beli" />
+                <input type="number" value={tier.unitCost} onChange={(event) => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.map((item) => item.id === tier.id ? { ...item, unitCost: Number(event.target.value) } : item) })} className={inputClass()} placeholder="Modal per unit" />
                 <label className="flex items-center justify-center gap-2 rounded-lg border border-[#ded2bf] bg-white text-sm"><input type="radio" checked={productDraft.selectedTierId === tier.id} onChange={() => setEditingProduct({ ...productDraft, selectedTierId: tier.id })} /> Pakai</label>
-                <button type="button" onClick={() => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.filter((item) => item.id !== tier.id) })} className="min-h-10 rounded-lg border border-[#e1aaa0] text-[#a33a2d]"><Trash2 className="mx-auto h-4 w-4" /></button>
+                <div className="flex flex-wrap items-center gap-1">
+                  <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
+                  <button type="button" onClick={() => setEditingProduct({ ...productDraft, buyingTiers: [...productDraft.buyingTiers, { ...tier, id: generateId("tier") }] })} className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Copy</button>
+                  <button type="button" onClick={() => window.confirm("Hapus tier ini?") && setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.filter((item) => item.id !== tier.id) })} className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]">Hapus</button>
+                </div>
               </div>
             ))}
           </div>
@@ -2370,6 +2809,9 @@ function ProductPage({ data, persist, editingProduct, setEditingProduct, addCate
 }
 
 function ProductTable({ data, persist, setEditingProduct }: { data: StorageSchema; persist: (next: StorageSchema) => void; setEditingProduct: (product: Product) => void }) {
+  const duplicateProduct = (product: Product) => {
+    persist({ ...data, products: [{ ...product, id: generateId("prd"), name: `${product.name} Salinan` }, ...data.products] });
+  };
   return (
     <Card>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -2391,9 +2833,10 @@ function ProductTable({ data, persist, setEditingProduct }: { data: StorageSchem
                 <MiniMetric label="VIP" value={`${rupiah(vip.netProfit)} (${percent(vip.marginPercent)})`} />
                 <MiniMetric label="Promo" value={`${rupiah(promo.netProfit)} (${percent(promo.marginPercent)})`} />
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="mt-4 grid grid-cols-3 gap-2">
                 <ActionButton variant="ghost" onClick={() => setEditingProduct(product)}>Edit</ActionButton>
-                <ActionButton variant="danger" onClick={() => window.confirm("Hapus produk ini?") && persist({ ...data, products: data.products.filter((item) => item.id !== product.id) })}><Trash2 className="h-4 w-4" /></ActionButton>
+                <ActionButton variant="secondary" onClick={() => duplicateProduct(product)}><Copy className="h-4 w-4" /></ActionButton>
+                <ActionButton variant="danger" onClick={() => window.confirm("Hapus produk ini?") && persist({ ...data, products: data.products.filter((item) => item.id !== product.id) })}>Hapus</ActionButton>
               </div>
             </div>
           );
@@ -2417,7 +2860,7 @@ function ProductTable({ data, persist, setEditingProduct }: { data: StorageSchem
                   <td className="p-3">{rupiah(vip.netProfit)} ({percent(vip.marginPercent)})</td>
                   <td className="p-3">{rupiah(promo.netProfit)} ({percent(promo.marginPercent)})</td>
                   <td className="p-3">{product.stockQuantity ?? "-"}</td>
-                  <td className="p-3"><div className="flex gap-2"><ActionButton variant="ghost" onClick={() => setEditingProduct(product)}>Edit</ActionButton><ActionButton variant="danger" onClick={() => window.confirm("Hapus produk ini?") && persist({ ...data, products: data.products.filter((item) => item.id !== product.id) })}><Trash2 className="h-4 w-4" /></ActionButton></div></td>
+                  <td className="p-3"><div className="flex gap-2"><ActionButton variant="ghost" onClick={() => setEditingProduct(product)}>Edit</ActionButton><ActionButton variant="secondary" onClick={() => duplicateProduct(product)}><Copy className="h-4 w-4" /></ActionButton><ActionButton variant="danger" onClick={() => window.confirm("Hapus produk ini?") && persist({ ...data, products: data.products.filter((item) => item.id !== product.id) })}>Hapus</ActionButton></div></td>
                 </tr>
               );
             })}
@@ -2647,6 +3090,28 @@ function MasterCategoriesPage({ data, persist, addCategory }: { data: StorageSch
       categories: data.categories.map((item) => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString().slice(0, 10) } : item),
     });
   };
+  const categoryIsUsed = (id: string) => {
+    const fixedNotes = Object.values(data.fixedCosts.costNotes ?? {}).includes(id);
+    const staff = (data.fixedCosts.staffCosts ?? []).some((item) => item.categoryId === id);
+    const electricity = [
+      ...(data.fixedCosts.electricitySettings?.devices ?? []).map((item) => item.categoryId),
+      ...(data.fixedCosts.electricitySettings?.acItems ?? []).map((item) => item.categoryId),
+    ].includes(id);
+    const treatments = data.treatments.some((treatment) =>
+      (treatment.disposableItems ?? treatment.disposableCosts ?? []).some((item) => item.categoryId === id) ||
+      (treatment.materialItems ?? []).some((item) => item.categoryId === id),
+    );
+    const consumables = data.consumables.some((item) => item.categoryId === id);
+    const products = data.products.some((item) => item.categoryId === id);
+    return fixedNotes || staff || electricity || treatments || consumables || products;
+  };
+  const deleteCategory = (item: HppCategory) => {
+    if (categoryIsUsed(item.id)) {
+      window.alert("Kategori sudah dipakai, nonaktifkan saja agar data lama tetap aman.");
+      return;
+    }
+    if (window.confirm("Hapus kategori ini?")) persist({ ...data, categories: data.categories.filter((category) => category.id !== item.id) });
+  };
 
   return (
     <div className="grid min-w-0 gap-6">
@@ -2679,7 +3144,11 @@ function MasterCategoriesPage({ data, persist, addCategory }: { data: StorageSch
               <input className={inputClass()} value={item.name} onChange={(event) => updateCategory(item.id, { name: event.target.value })} />
               <p className="mt-2 text-xs text-[#756b5d]">{categoryGroupLabels[item.group]}</p>
               <input className={`${inputClass()} mt-2`} value={item.notes ?? ""} onChange={(event) => updateCategory(item.id, { notes: event.target.value })} placeholder="Notes" />
-              <div className="mt-3"><ActionButton variant={item.active ? "danger" : "secondary"} onClick={() => updateCategory(item.id, { active: !item.active })}>{item.active ? "Nonaktifkan" : "Aktifkan"}</ActionButton></div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <ActionButton variant="ghost" onClick={() => updateCategory(item.id, { name: item.name })}>Edit</ActionButton>
+                <ActionButton variant={item.active ? "danger" : "secondary"} onClick={() => updateCategory(item.id, { active: !item.active })}>{item.active ? "Nonaktifkan" : "Aktifkan"}</ActionButton>
+                <ActionButton variant="danger" onClick={() => deleteCategory(item)}>{categoryIsUsed(item.id) ? "Delete disabled" : "Hapus"}</ActionButton>
+              </div>
             </div>
           ))}
         </div>
@@ -2695,7 +3164,13 @@ function MasterCategoriesPage({ data, persist, addCategory }: { data: StorageSch
                   <td className="p-3">{categoryGroupLabels[item.group]}</td>
                   <td className="p-3">{item.active ? "Kategori aktif" : "Kategori nonaktif"}</td>
                   <td className="p-3"><input className={inputClass()} value={item.notes ?? ""} onChange={(event) => updateCategory(item.id, { notes: event.target.value })} /></td>
-                  <td className="p-3"><ActionButton variant={item.active ? "danger" : "secondary"} onClick={() => updateCategory(item.id, { active: !item.active })}>{item.active ? "Nonaktifkan" : "Aktifkan"}</ActionButton></td>
+                  <td className="p-3">
+                    <div className="flex flex-wrap gap-2" title={categoryIsUsed(item.id) ? "Kategori sudah dipakai, nonaktifkan saja agar data lama tetap aman." : undefined}>
+                      <ActionButton variant="ghost" onClick={() => updateCategory(item.id, { name: item.name })}>Edit</ActionButton>
+                      <ActionButton variant={item.active ? "danger" : "secondary"} onClick={() => updateCategory(item.id, { active: !item.active })}>{item.active ? "Nonaktifkan" : "Aktifkan"}</ActionButton>
+                      <ActionButton variant="danger" onClick={() => deleteCategory(item)}>{categoryIsUsed(item.id) ? "Delete disabled" : "Hapus"}</ActionButton>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

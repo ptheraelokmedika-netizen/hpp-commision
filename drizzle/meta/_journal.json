@@ -43,6 +43,13 @@
       "when": 1780814349386,
       "tag": "0005_magical_shatterstar",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780820025217,
+      "tag": "0006_long_crusher_hogan",
+      "breakpoints": true
     }
   ]
 }

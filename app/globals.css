@@ -29,3 +29,26 @@ textarea {
   background: #d8b65f;
   color: #0d4b3a;
 }
+
+.stock-print-area {
+  display: none;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .stock-print-area {
+    display: block !important;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+}

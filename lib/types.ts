@@ -238,7 +238,56 @@ export type ConsumableItem = {
   costPerSmallestUnit: number;
   availableQuantity: number;
   minimumStock: number;
+  currentStock?: number;
+  stockUnit?: ConsumableUnit;
+  lastStockCheckDate?: string;
+  lastStockCheckBy?: string;
+  lastPhysicalStock?: number;
+  lastStockDifference?: number;
   notes?: string;
+  active?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type StockAdjustment = {
+  id: string;
+  materialId: string;
+  materialNameSnapshot: string;
+  type: "Tambah stok" | "Kurangi stok" | "Set stok manual";
+  quantity: number;
+  previousStock: number;
+  newStock: number;
+  reason: "Pembelian" | "Pemakaian" | "Rusak" | "Expired" | "Sample" | "Koreksi stok" | "Lainnya";
+  notes?: string;
+  date: string;
+  pic: string;
+  createdAt: string;
+};
+
+export type StockOpnameStatus = "draft" | "finalized" | "applied";
+export type StockOpnameItem = {
+  materialId: string;
+  materialNameSnapshot: string;
+  categorySnapshot: string;
+  systemStock: number;
+  physicalStock?: number;
+  difference: number;
+  unit: ConsumableUnit;
+  status: "Sesuai" | "Selisih kurang" | "Selisih lebih" | "Belum diisi";
+  notes?: string;
+};
+
+export type StockOpname = {
+  id: string;
+  date: string;
+  checkedBy: string;
+  location?: string;
+  notes?: string;
+  status: StockOpnameStatus;
+  items: StockOpnameItem[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CommissionRule = {
@@ -357,6 +406,8 @@ export type StorageSchema = {
   simulations: SimulationRecord[];
   commissionLogs: CommissionLog[];
   consumables: ConsumableItem[];
+  stockAdjustments: StockAdjustment[];
+  stockOpnames: StockOpname[];
   hppPackages: HppPackageTemplate[];
   categories: HppCategory[];
 };
