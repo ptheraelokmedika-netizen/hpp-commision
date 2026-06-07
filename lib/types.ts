@@ -154,6 +154,40 @@ export type TreatmentMachineItem = {
   notes?: string;
 };
 
+export type TreatmentDeviceElectricityCost = {
+  id: string;
+  deviceName: string;
+  watt: number;
+  durationMinutes: number;
+  tariffPerKwh: number;
+  kwhPerTreatment: number;
+  costPerTreatment: number;
+  includeInHpp: boolean;
+  notes?: string;
+};
+
+export type TreatmentShotCartridgeCost = {
+  id: string;
+  cartridgeName: string;
+  cartridgePrice: number;
+  totalCapacity: number;
+  unit: "shots" | "pulses" | "tips" | "lines" | "cc" | "ml" | "other";
+  usedPerTreatment: number;
+  costPerTreatment: number;
+  includeInHpp: boolean;
+  notes?: string;
+};
+
+export type TreatmentStaffFeeCost = {
+  id: string;
+  role: string;
+  type: "nominal" | "percent";
+  value: number;
+  total: number;
+  includeInHpp: boolean;
+  notes?: string;
+};
+
 export type TreatmentConsumableUsage = {
   id: string;
   consumableId: string;
@@ -229,6 +263,10 @@ export type Treatment = {
   consumableUsages?: TreatmentConsumableUsage[];
   materialItems: TreatmentMaterialItem[];
   machineItems: TreatmentMachineItem[];
+  deviceElectricityCosts?: TreatmentDeviceElectricityCost[];
+  shotCartridgeCosts?: TreatmentShotCartridgeCost[];
+  staffFeeCosts?: TreatmentStaffFeeCost[];
+  includeOverhead?: boolean;
   productMaterialCost: number;
   machineCostAllocation: number;
   staffInvolved: StaffRole[];

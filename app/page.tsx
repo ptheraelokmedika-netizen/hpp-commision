@@ -65,8 +65,11 @@ import type {
   Treatment,
   TreatmentConsumableUsage,
   TreatmentCostItem,
+  TreatmentDeviceElectricityCost,
   TreatmentMachineItem,
   TreatmentMaterialItem,
+  TreatmentShotCartridgeCost,
+  TreatmentStaffFeeCost,
 } from "../lib/types";
 
 type ViewKey = "dashboard" | "fixed" | "treatments" | "consumables" | "hppPackages" | "masterCategories" | "products" | "simulation" | "logs" | "reports";
@@ -153,6 +156,10 @@ function emptyTreatment(): Treatment {
     disposableItems,
     materialItems: [],
     machineItems: [],
+    deviceElectricityCosts: [],
+    shotCartridgeCosts: [],
+    staffFeeCosts: [],
+    includeOverhead: true,
     productMaterialCost: 0,
     machineCostAllocation: 0,
     staffInvolved: ["therapist"],
@@ -255,6 +262,11 @@ function normalizeTreatmentForEdit(treatment: Treatment): Treatment {
     disposableCosts: disposableItems,
     materialItems: treatment.materialItems ?? [],
     machineItems: treatment.machineItems ?? [],
+    consumableUsages: treatment.consumableUsages ?? [],
+    deviceElectricityCosts: treatment.deviceElectricityCosts ?? [],
+    shotCartridgeCosts: treatment.shotCartridgeCosts ?? [],
+    staffFeeCosts: treatment.staffFeeCosts ?? [],
+    includeOverhead: treatment.includeOverhead ?? true,
     staffInvolved: treatment.staffInvolved ?? [],
     commissionRules: (treatment.commissionRules ?? []).map((rule) => ({
       ...rule,
@@ -263,6 +275,18 @@ function normalizeTreatmentForEdit(treatment: Treatment): Treatment {
       appliesTo: rule.appliesTo === "Non VIP" ? "Normal" : rule.appliesTo,
     })),
   };
+}
+
+function treatmentDeviceElectricityTotal(items: TreatmentDeviceElectricityCost[] = []) {
+  return items.filter((item) => item.includeInHpp).reduce((sum, item) => sum + item.costPerTreatment, 0);
+}
+
+function treatmentShotCartridgeTotal(items: TreatmentShotCartridgeCost[] = []) {
+  return items.filter((item) => item.includeInHpp).reduce((sum, item) => sum + item.costPerTreatment, 0);
+}
+
+function treatmentStaffFeeTotal(items: TreatmentStaffFeeCost[] = []) {
+  return items.filter((item) => item.includeInHpp).reduce((sum, item) => sum + item.total, 0);
 }
 
 function inputClass(extra = "") {
@@ -780,19 +804,31 @@ function FixedCostPage({ data, persist, addCategory }: { data: StorageSchema; pe
           </div>
           <ActionButton onClick={() => updateSettings(settings, "Pengaturan berhasil disimpan.")}><Save className="h-4 w-4" /> Save Staff Cost Settings</ActionButton>
         </div>
-        <div className="grid gap-3">
-          {(settings.staffCosts ?? []).map((staff) => (
-            <div key={staff.id} className="grid min-w-0 gap-2 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3 md:grid-cols-[minmax(0,1fr)_90px_minmax(0,1fr)_minmax(0,1fr)_130px_130px_140px]">
-              <CategorySelect label="Role" group="staff-role" value={staff.categoryId} fallbackName={staff.role} categories={data.categories} addCategory={addCategory} onChange={(categoryId, name) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, categoryId, role: name || item.role } : item) })} />
-              <input className={inputClass()} type="number" value={staff.count} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, count: Number(event.target.value) } : item) })} placeholder="Jumlah orang" />
-              <input className={inputClass()} type="number" value={staff.salaryPerPerson} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, salaryPerPerson: Number(event.target.value) } : item) })} placeholder="Gaji per orang" />
-              <input className={inputClass()} type="number" value={staff.allowancePerPerson} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, allowancePerPerson: Number(event.target.value) } : item) })} placeholder="Tunjangan per orang" />
-              <label className="flex items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 text-sm"><input type="checkbox" checked={staff.overrideManual} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, overrideManual: event.target.checked } : item) })} /> Override total manual</label>
-              <input className={inputClass()} type="number" disabled={!staff.overrideManual} value={staff.manualTotal} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, manualTotal: Number(event.target.value) } : item) })} placeholder="Total manual" />
-              <ModeSelect value={staff.mode} onChange={(mode) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, mode } : item) })} />
-              <div className="md:col-span-7 text-sm font-semibold text-[#0d4b3a]">Total otomatis: {rupiah(staffCostTotal(staff))}</div>
-            </div>
-          ))}
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+          <table className="w-full min-w-[1120px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+              <tr>{["Role", "Jumlah orang", "Gaji/orang", "Tunjangan/orang", "Override?", "Total manual", "Total otomatis", "Mode", "Notes", "Action"].map((head) => <th key={head} className="p-2">{head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {(settings.staffCosts ?? []).map((staff) => (
+                <tr key={staff.id} className="border-t border-[#efe4d2] align-top">
+                  <td className="p-2"><CategorySelect label="" group="staff-role" value={staff.categoryId} fallbackName={staff.role} categories={data.categories} addCategory={addCategory} onChange={(categoryId, name) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, categoryId, role: name || item.role } : item) })} /></td>
+                  <td className="p-2"><input className={inputClass()} type="number" value={staff.count} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, count: Number(event.target.value) } : item) })} placeholder="Jumlah" /></td>
+                  <td className="p-2"><input className={inputClass()} type="number" value={staff.salaryPerPerson} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, salaryPerPerson: Number(event.target.value) } : item) })} placeholder="Gaji per orang" /></td>
+                  <td className="p-2"><input className={inputClass()} type="number" value={staff.allowancePerPerson} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, allowancePerPerson: Number(event.target.value) } : item) })} placeholder="Tunjangan" /></td>
+                  <td className="p-2 text-center"><input type="checkbox" checked={staff.overrideManual} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, overrideManual: event.target.checked } : item) })} /></td>
+                  <td className="p-2"><input className={inputClass()} type="number" disabled={!staff.overrideManual} value={staff.manualTotal} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, manualTotal: Number(event.target.value) } : item) })} placeholder="Total manual" /></td>
+                  <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(staffCostTotal(staff))}</td>
+                  <td className="p-2"><ModeSelect value={staff.mode} onChange={(mode) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, mode } : item) })} /></td>
+                  <td className="p-2"><input className={inputClass()} value={staff.notes ?? ""} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, notes: event.target.value } : item) })} placeholder="Catatan" /></td>
+                  <td className="p-2"><ActionButton variant="danger" onClick={() => updateSettings({ ...settings, staffCosts: settings.staffCosts!.filter((item) => item.id !== staff.id) })}><Trash2 className="h-4 w-4" /></ActionButton></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="border-t border-[#eadfce] bg-[#fffaf2] p-3">
+            <ActionButton variant="ghost" onClick={() => updateSettings({ ...settings, staffCosts: [...(settings.staffCosts ?? []), { id: generateId("staff"), role: "Other Staff", count: 1, salaryPerPerson: 0, allowancePerPerson: 0, mode: "hpp", overrideManual: false, manualTotal: 0, notes: "" }] })}><Plus className="h-4 w-4" /> Tambah Role Staff</ActionButton>
+          </div>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <StatCard label="Total payroll klinik" value={rupiah(totals.payrollTotal)} />
@@ -808,23 +844,79 @@ function FixedCostPage({ data, persist, addCategory }: { data: StorageSchema; pe
           <h3 className="text-lg font-semibold text-[#0d4b3a]">Other Fixed Costs</h3>
           <Save className="h-5 w-5 shrink-0 text-[#b19042]" />
         </div>
-        <div className="grid gap-3">
-          {fixedCostFields.filter((field) => !["listrik", "gajiDokter", "gajiTherapist", "gajiBeautician", "gajiAdmin"].includes(field.key as string)).map((field) => (
-            <FixedCostModeRow
-              key={field.key}
-              label={field.label}
-              amount={Number(settings[field.key])}
-              mode={settings.costModes?.[field.key as string] ?? (field.installment ? "cashflow" : "hpp")}
-              notes={settings.costNotes?.[field.key as string] ?? ""}
-              onAmount={(value) => update(field.key, value)}
-              onMode={(mode) => updateSettings({ ...settings, costModes: { ...(settings.costModes ?? {}), [field.key]: mode } })}
-              onNotes={(notes) => updateSettings({ ...settings, costNotes: { ...(settings.costNotes ?? {}), [field.key]: notes } })}
-              categories={data.categories}
-              categoryId={(settings.costNotes as Record<string, string> | undefined)?.[`${field.key}CategoryId`]}
-              addCategory={addCategory}
-              onCategory={(categoryId) => updateSettings({ ...settings, costNotes: { ...(settings.costNotes ?? {}), [`${field.key}CategoryId`]: categoryId } })}
-            />
-          ))}
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+          <table className="w-full min-w-[980px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+              <tr>{["Kategori", "Nama biaya", "Nominal / bulan", "Mode", "Notes", "Action"].map((head) => <th key={head} className="p-2">{head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {fixedCostFields.filter((field) => !["gajiDokter", "gajiTherapist", "gajiBeautician", "gajiAdmin"].includes(field.key as string)).map((field) => {
+                const key = field.key as string;
+                const isElectricity = key === "listrik";
+                const electricity = settings.electricitySettings!;
+                const amount = isElectricity ? electricitySummary(settings).totalMonthly : Number(settings[field.key]);
+                return (
+                  <tr key={field.key} className="border-t border-[#efe4d2] align-top">
+                    <td className="p-2">
+                      <CategorySelect
+                        label=""
+                        group={field.installment ? "installment" : "fixed-cost"}
+                        value={(settings.costNotes as Record<string, string> | undefined)?.[`${field.key}CategoryId`]}
+                        fallbackName={field.installment ? "Cicilan / cashflow" : "Biaya tetap"}
+                        categories={data.categories}
+                        addCategory={addCategory}
+                        onChange={(categoryId) => updateSettings({ ...settings, costNotes: { ...(settings.costNotes ?? {}), [`${field.key}CategoryId`]: categoryId } })}
+                      />
+                    </td>
+                    <td className="p-2">
+                      <div className="font-semibold text-[#4d473d]">{field.label}</div>
+                      {isElectricity && (
+                        <label className="mt-2 flex items-center gap-2 text-xs text-[#756b5d]">
+                          <input
+                            type="checkbox"
+                            checked={electricity.useCalculatorTotal}
+                            onChange={(event) => updateSettings({ ...settings, electricitySettings: { ...electricity, useCalculatorTotal: event.target.checked } })}
+                          />
+                          Gunakan total dari kalkulator listrik
+                        </label>
+                      )}
+                    </td>
+                    <td className="p-2">
+                      <input
+                        className={inputClass()}
+                        type="number"
+                        value={Math.round(amount)}
+                        disabled={isElectricity && electricity.useCalculatorTotal}
+                        onChange={(event) => isElectricity ? update("listrik", Number(event.target.value)) : update(field.key, Number(event.target.value))}
+                        placeholder="Nominal per bulan"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <ModeSelect
+                        value={isElectricity ? electricity.mode : settings.costModes?.[key] ?? (field.installment ? "cashflow" : "hpp")}
+                        onChange={(mode) => isElectricity
+                          ? updateSettings({ ...settings, electricitySettings: { ...electricity, mode } })
+                          : updateSettings({ ...settings, costModes: { ...(settings.costModes ?? {}), [field.key]: mode } })}
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        className={inputClass()}
+                        value={isElectricity ? electricity.notes ?? "" : settings.costNotes?.[key] ?? ""}
+                        onChange={(event) => isElectricity
+                          ? updateSettings({ ...settings, electricitySettings: { ...electricity, notes: event.target.value } })
+                          : updateSettings({ ...settings, costNotes: { ...(settings.costNotes ?? {}), [field.key]: event.target.value } })}
+                        placeholder="Catatan"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <ActionButton variant="ghost" onClick={() => isElectricity ? update("listrik", 0) : update(field.key, 0)}>Reset</ActionButton>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </Card>
 
@@ -912,12 +1004,10 @@ function CategorySelect({
   addCategory: (group: CategoryGroup, name: string, notes?: string) => string;
 }) {
   const [showModal, setShowModal] = useState(false);
-  const [search, setSearch] = useState("");
   const [newName, setNewName] = useState("");
   const [notes, setNotes] = useState("");
   const active = categories.filter((item) => item.group === group && item.active);
   const selectedExists = value ? categories.some((item) => item.id === value) : false;
-  const filtered = active.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()));
 
   const save = () => {
     const id = addCategory(group, newName, notes);
@@ -929,29 +1019,26 @@ function CategorySelect({
 
   return (
     <label className="grid min-w-0 gap-1.5 text-sm text-[#4d473d]">
-      <span className="font-medium">{label}</span>
-      <input className={inputClass()} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari kategori" />
-      <select
-        value={selectedExists ? value : fallbackName ? `legacy:${fallbackName}` : ""}
-        onChange={(event) => {
-          if (event.target.value === "__add") {
-            setShowModal(true);
-            return;
-          }
-          if (event.target.value.startsWith("legacy:")) {
-            onChange("", event.target.value.replace("legacy:", ""));
-            return;
-          }
-          const item = categories.find((category) => category.id === event.target.value);
-          onChange(event.target.value, item?.name ?? "");
-        }}
-        className={inputClass()}
-      >
-        {!selectedExists && fallbackName && <option value={`legacy:${fallbackName}`}>{fallbackName} (custom lama)</option>}
-        <option value="">Pilih kategori</option>
-        {filtered.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        <option value="__add">+ Tambah kategori baru</option>
-      </select>
+      {label ? <span className="font-medium">{label}</span> : null}
+      <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
+        <select
+          value={selectedExists ? value : fallbackName ? `legacy:${fallbackName}` : ""}
+          onChange={(event) => {
+            if (event.target.value.startsWith("legacy:")) {
+              onChange("", event.target.value.replace("legacy:", ""));
+              return;
+            }
+            const item = categories.find((category) => category.id === event.target.value);
+            onChange(event.target.value, item?.name ?? "");
+          }}
+          className={inputClass()}
+        >
+          {!selectedExists && fallbackName && <option value={`legacy:${fallbackName}`}>{fallbackName} (custom lama)</option>}
+          <option value="">Pilih kategori</option>
+          {active.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+        <button type="button" onClick={() => setShowModal(true)} className="min-h-11 rounded-lg border border-[#ded2bf] bg-white text-sm font-bold text-[#0d4b3a]">+</button>
+      </div>
       {showModal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg border border-[#e8dcc8] bg-[#fffdf8] p-4 shadow-xl">
@@ -1106,6 +1193,7 @@ function TreatmentPage(props: {
   const baseResult = treatmentResult(editingTreatment, data.fixedCosts, priceMode === "Manual" ? "Normal" : priceMode, defaultPrice);
   const sliderMax = Math.max(baseResult.recommendedPrice * 3, editingTreatment.nonVipPrice * 2, baseResult.totalCost + 100000);
   const [manualPrice, setManualPrice] = useState(0);
+  const [savedMessage, setSavedMessage] = useState("");
   const sellingPrice = priceMode === "Manual" ? manualPrice || Math.ceil(baseResult.recommendedPrice / 10000) * 10000 : defaultPrice;
   const liveResult = treatmentResult(editingTreatment, data.fixedCosts, priceMode === "Manual" ? "Normal" : priceMode, sellingPrice);
 
@@ -1119,6 +1207,8 @@ function TreatmentPage(props: {
     const synced = { ...editingTreatment, disposableCosts: editingTreatment.disposableItems ?? editingTreatment.disposableCosts };
     const exists = data.treatments.some((treatment) => treatment.id === synced.id);
     persist({ ...data, treatments: exists ? data.treatments.map((treatment) => (treatment.id === synced.id ? synced : treatment)) : [synced, ...data.treatments] });
+    setSavedMessage("Data berhasil disimpan.");
+    window.setTimeout(() => setSavedMessage(""), 2200);
     setEditingTreatment(emptyTreatment());
   };
   const deleteTreatment = (id: string) => {
@@ -1142,6 +1232,10 @@ function TreatmentPage(props: {
             <DynamicConsumableUsageSection treatment={editingTreatment} updateTreatment={updateTreatment} consumables={data.consumables ?? []} />
             <DynamicMaterialSection treatment={editingTreatment} updateTreatment={updateTreatment} categories={data.categories} addCategory={addCategory} />
             <DynamicMachineSection treatment={editingTreatment} updateTreatment={updateTreatment} />
+            <TreatmentDeviceElectricitySection treatment={editingTreatment} updateTreatment={updateTreatment} defaultTariff={data.fixedCosts.electricitySettings?.tariffPerKwh ?? 1444} />
+            <TreatmentShotCartridgeSection treatment={editingTreatment} updateTreatment={updateTreatment} />
+            <TreatmentStaffFeeSection treatment={editingTreatment} updateTreatment={updateTreatment} basePrice={editingTreatment.nonVipPrice} />
+            <TreatmentOverheadSection treatment={editingTreatment} updateTreatment={updateTreatment} settings={data.fixedCosts} />
 
             <div>
               <p className="mb-2 text-sm font-semibold text-[#0d4b3a]">Staff yang terlibat</p>
@@ -1177,6 +1271,7 @@ function TreatmentPage(props: {
               <ActionButton onClick={saveTreatment}><Save className="h-4 w-4" /> Simpan treatment</ActionButton>
               <ActionButton variant="ghost" onClick={() => setEditingTreatment(emptyTreatment())}><Plus className="h-4 w-4" /> Baru</ActionButton>
             </div>
+            {savedMessage && <div className="rounded-lg border border-[#bdd8cb] bg-white p-3 text-sm font-semibold text-[#0d4b3a]">{savedMessage}</div>}
           </div>
         </Card>
 
@@ -1188,6 +1283,10 @@ function TreatmentPage(props: {
           <h3 className="text-lg font-semibold text-[#0d4b3a]">Simulasi Harga & Profit</h3>
           <div className="mt-4 grid min-w-0 gap-4">
             <div className="grid gap-3 sm:grid-cols-2">
+              <StatCard label="Consumable + material + alat" value={rupiah(liveResult.directHpp - treatmentDeviceElectricityTotal(editingTreatment.deviceElectricityCosts) - treatmentShotCartridgeTotal(editingTreatment.shotCartridgeCosts) - treatmentStaffFeeTotal(editingTreatment.staffFeeCosts) - liveResult.electricityPerTreatment)} />
+              <StatCard label="Listrik device treatment" value={rupiah(treatmentDeviceElectricityTotal(editingTreatment.deviceElectricityCosts) + liveResult.electricityPerTreatment)} tone="gold" />
+              <StatCard label="Shot / cartridge" value={rupiah(treatmentShotCartridgeTotal(editingTreatment.shotCartridgeCosts))} tone="gold" />
+              <StatCard label="Staff fee masuk HPP" value={rupiah(treatmentStaffFeeTotal(editingTreatment.staffFeeCosts))} tone="gold" />
               <StatCard label="Direct HPP" value={rupiah(liveResult.directHpp)} />
               <StatCard label="Biaya listrik per tindakan" value={rupiah(liveResult.electricityPerTreatment)} tone="gold" />
               <StatCard label="Overhead per treatment" value={rupiah(liveResult.overheadAllocated)} tone="gold" />
@@ -1492,6 +1591,170 @@ function DynamicMachineSection({ treatment, updateTreatment }: { treatment: Trea
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+function TreatmentDeviceElectricitySection({ treatment, updateTreatment, defaultTariff }: { treatment: Treatment; updateTreatment: (treatment: Treatment) => void; defaultTariff: number }) {
+  const items = treatment.deviceElectricityCosts ?? [];
+  const compute = (item: Pick<TreatmentDeviceElectricityCost, "watt" | "durationMinutes" | "tariffPerKwh">) => {
+    const kwhPerTreatment = ((Number(item.watt) || 0) * (Number(item.durationMinutes) || 0)) / 60 / 1000;
+    return { kwhPerTreatment, costPerTreatment: Math.round(kwhPerTreatment * (Number(item.tariffPerKwh) || 0)) };
+  };
+  const normalize = (item: TreatmentDeviceElectricityCost) => ({ ...item, ...compute(item) });
+  const updateItem = (id: string, patch: Partial<TreatmentDeviceElectricityCost>) =>
+    updateTreatment({ ...treatment, deviceElectricityCosts: items.map((item) => (item.id === id ? normalize({ ...item, ...patch }) : item)) });
+
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-[#0d4b3a]">Device Electricity Cost</p>
+          <p className="mt-1 text-xs text-[#756b5d]">Hitung listrik alat khusus per tindakan: watt x durasi x tarif PLN.</p>
+        </div>
+        <ActionButton variant="ghost" onClick={() => updateTreatment({ ...treatment, deviceElectricityCosts: [...items, normalize({ id: generateId("devhpp"), deviceName: "", watt: 0, durationMinutes: treatment.durationMinutes, tariffPerKwh: defaultTariff, kwhPerTreatment: 0, costPerTreatment: 0, includeInHpp: true, notes: "" })] })}>
+          <Plus className="h-4 w-4" /> Tambah device cost
+        </ActionButton>
+      </div>
+      {items.length === 0 ? <EmptyState text="Belum ada biaya listrik device khusus." /> : (
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+          <table className="w-full min-w-[920px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+              <tr>{["Nama device", "Watt", "Durasi menit", "Tarif/kWh", "kWh/treatment", "Biaya/treatment", "Include?", "Action"].map((head) => <th key={head} className="p-2">{head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id} className="border-t border-[#efe4d2]">
+                  <td className="p-2"><input value={item.deviceName} onChange={(event) => updateItem(item.id, { deviceName: event.target.value })} placeholder="Nama device" className={inputClass()} /></td>
+                  <td className="p-2"><input type="number" value={item.watt} onChange={(event) => updateItem(item.id, { watt: Number(event.target.value) })} placeholder="Watt" className={inputClass()} /></td>
+                  <td className="p-2"><input type="number" value={item.durationMinutes} onChange={(event) => updateItem(item.id, { durationMinutes: Number(event.target.value) })} placeholder="Menit" className={inputClass()} /></td>
+                  <td className="p-2"><input type="number" value={item.tariffPerKwh} onChange={(event) => updateItem(item.id, { tariffPerKwh: Number(event.target.value) })} placeholder="Tarif" className={inputClass()} /></td>
+                  <td className="p-2 font-medium">{item.kwhPerTreatment.toFixed(4)}</td>
+                  <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(item.costPerTreatment)}</td>
+                  <td className="p-2 text-center"><input type="checkbox" checked={item.includeInHpp} onChange={(event) => updateItem(item.id, { includeInHpp: event.target.checked })} /></td>
+                  <td className="p-2"><ActionButton variant="danger" onClick={() => updateTreatment({ ...treatment, deviceElectricityCosts: items.filter((row) => row.id !== item.id) })}><Trash2 className="h-4 w-4" /></ActionButton></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TreatmentShotCartridgeSection({ treatment, updateTreatment }: { treatment: Treatment; updateTreatment: (treatment: Treatment) => void }) {
+  const items = treatment.shotCartridgeCosts ?? [];
+  const normalize = (item: TreatmentShotCartridgeCost) => ({
+    ...item,
+    costPerTreatment: item.totalCapacity > 0 ? Math.round((item.cartridgePrice / item.totalCapacity) * item.usedPerTreatment) : 0,
+  });
+  const updateItem = (id: string, patch: Partial<TreatmentShotCartridgeCost>) =>
+    updateTreatment({ ...treatment, shotCartridgeCosts: items.map((item) => (item.id === id ? normalize({ ...item, ...patch }) : item)) });
+
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-[#0d4b3a]">Shot / Cartridge Cost</p>
+        <ActionButton variant="ghost" onClick={() => updateTreatment({ ...treatment, shotCartridgeCosts: [...items, { id: generateId("shot"), cartridgeName: "", cartridgePrice: 0, totalCapacity: 1, unit: "shots", usedPerTreatment: 1, costPerTreatment: 0, includeInHpp: true, notes: "" }] })}>
+          <Plus className="h-4 w-4" /> Tambah shot / cartridge
+        </ActionButton>
+      </div>
+      {items.length === 0 ? <EmptyState text="Belum ada biaya shot, tip, line, cartridge, atau vial." /> : (
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+          <table className="w-full min-w-[980px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+              <tr>{["Nama alat/cartridge", "Harga cartridge", "Isi total", "Unit", "Dipakai/treatment", "Cost/treatment", "Include?", "Action"].map((head) => <th key={head} className="p-2">{head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id} className="border-t border-[#efe4d2]">
+                  <td className="p-2"><input value={item.cartridgeName} onChange={(event) => updateItem(item.id, { cartridgeName: event.target.value })} placeholder="Nama cartridge" className={inputClass()} /></td>
+                  <td className="p-2"><input type="number" value={item.cartridgePrice} onChange={(event) => updateItem(item.id, { cartridgePrice: Number(event.target.value) })} placeholder="Harga" className={inputClass()} /></td>
+                  <td className="p-2"><input type="number" value={item.totalCapacity} onChange={(event) => updateItem(item.id, { totalCapacity: Number(event.target.value) })} placeholder="Isi total" className={inputClass()} /></td>
+                  <td className="p-2">
+                    <select value={item.unit} onChange={(event) => updateItem(item.id, { unit: event.target.value as TreatmentShotCartridgeCost["unit"] })} className={inputClass()}>
+                      {["shots", "pulses", "tips", "lines", "cc", "ml", "other"].map((unit) => <option key={unit}>{unit}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-2"><input type="number" value={item.usedPerTreatment} onChange={(event) => updateItem(item.id, { usedPerTreatment: Number(event.target.value) })} placeholder="Dipakai" className={inputClass()} /></td>
+                  <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(item.costPerTreatment)}</td>
+                  <td className="p-2 text-center"><input type="checkbox" checked={item.includeInHpp} onChange={(event) => updateItem(item.id, { includeInHpp: event.target.checked })} /></td>
+                  <td className="p-2"><ActionButton variant="danger" onClick={() => updateTreatment({ ...treatment, shotCartridgeCosts: items.filter((row) => row.id !== item.id) })}><Trash2 className="h-4 w-4" /></ActionButton></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TreatmentStaffFeeSection({ treatment, updateTreatment, basePrice }: { treatment: Treatment; updateTreatment: (treatment: Treatment) => void; basePrice: number }) {
+  const items = treatment.staffFeeCosts ?? [];
+  const normalize = (item: TreatmentStaffFeeCost) => ({ ...item, total: item.type === "percent" ? Math.round((basePrice * item.value) / 100) : Math.round(item.value) });
+  const updateItem = (id: string, patch: Partial<TreatmentStaffFeeCost>) =>
+    updateTreatment({ ...treatment, staffFeeCosts: items.map((item) => (item.id === id ? normalize({ ...item, ...patch }) : item)) });
+
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-[#0d4b3a]">Staff Fee / Commission Cost</p>
+          <p className="mt-1 text-xs text-[#756b5d]">Gunakan jika ada fee staff yang ingin dimasukkan sebagai HPP langsung. Aturan komisi tetap dihitung terpisah di bawah.</p>
+        </div>
+        <ActionButton variant="ghost" onClick={() => updateTreatment({ ...treatment, staffFeeCosts: [...items, { id: generateId("fee"), role: "therapist", type: "nominal", value: 0, total: 0, includeInHpp: true, notes: "" }] })}>
+          <Plus className="h-4 w-4" /> Tambah staff fee
+        </ActionButton>
+      </div>
+      {items.length === 0 ? <EmptyState text="Belum ada staff fee yang masuk HPP langsung." /> : (
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+              <tr>{["Role", "Tipe", "Nilai", "Total", "Include?", "Notes", "Action"].map((head) => <th key={head} className="p-2">{head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id} className="border-t border-[#efe4d2]">
+                  <td className="p-2"><input value={item.role} onChange={(event) => updateItem(item.id, { role: event.target.value })} placeholder="Role" className={inputClass()} /></td>
+                  <td className="p-2"><select value={item.type} onChange={(event) => updateItem(item.id, { type: event.target.value as TreatmentStaffFeeCost["type"] })} className={inputClass()}><option value="nominal">Nominal</option><option value="percent">% harga normal</option></select></td>
+                  <td className="p-2"><input type="number" value={item.value} onChange={(event) => updateItem(item.id, { value: Number(event.target.value) })} placeholder="Nilai" className={inputClass()} /></td>
+                  <td className="p-2 font-semibold text-[#0d4b3a]">{rupiah(item.total)}</td>
+                  <td className="p-2 text-center"><input type="checkbox" checked={item.includeInHpp} onChange={(event) => updateItem(item.id, { includeInHpp: event.target.checked })} /></td>
+                  <td className="p-2"><input value={item.notes ?? ""} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Catatan" className={inputClass()} /></td>
+                  <td className="p-2"><ActionButton variant="danger" onClick={() => updateTreatment({ ...treatment, staffFeeCosts: items.filter((row) => row.id !== item.id) })}><Trash2 className="h-4 w-4" /></ActionButton></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TreatmentOverheadSection({ treatment, updateTreatment, settings }: { treatment: Treatment; updateTreatment: (treatment: Treatment) => void; settings: FixedCostSettings }) {
+  const breakdown = fixedCostBreakdown(settings);
+  const overheadPerTreatment = treatment.includeOverhead === false ? 0 : breakdown.perMinute * treatment.durationMinutes;
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#d8b65f]/50 bg-[#fff8e8] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[#0d4b3a]">Overhead Allocation</p>
+          <p className="mt-1 text-xs text-[#756b5d]">Alokasi biaya tetap berdasarkan durasi treatment.</p>
+        </div>
+        <label className="flex min-h-11 items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 text-sm">
+          <input type="checkbox" checked={treatment.includeOverhead !== false} onChange={(event) => updateTreatment({ ...treatment, includeOverhead: event.target.checked })} />
+          Masukkan overhead ke HPP
+        </label>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MiniMetric label="Fixed cost / menit" value={rupiah(breakdown.perMinute)} />
+        <MiniMetric label="Durasi treatment" value={`${treatment.durationMinutes} menit`} />
+        <MiniMetric label="Overhead treatment" value={rupiah(overheadPerTreatment)} />
+        <MiniMetric label="Fixed cost / customer" value={rupiah(breakdown.perCustomer)} />
+      </div>
     </div>
   );
 }

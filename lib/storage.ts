@@ -164,6 +164,10 @@ function normalizeData(data: StorageSchema): StorageSchema {
       consumableUsages: treatment.consumableUsages ?? [],
       materialItems: treatment.materialItems ?? [],
       machineItems: treatment.machineItems ?? [],
+      deviceElectricityCosts: treatment.deviceElectricityCosts ?? [],
+      shotCartridgeCosts: treatment.shotCartridgeCosts ?? [],
+      staffFeeCosts: treatment.staffFeeCosts ?? [],
+      includeOverhead: treatment.includeOverhead ?? true,
       staffInvolved: treatment.staffInvolved ?? [],
       commissionRules: (treatment.commissionRules ?? []).map((rule) => ({
         ...rule,

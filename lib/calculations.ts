@@ -164,6 +164,9 @@ export function directTreatmentCost(treatment: Treatment) {
   const consumableUsages = treatment.consumableUsages ?? [];
   const materialItems = treatment.materialItems ?? [];
   const machineItems = treatment.machineItems ?? [];
+  const deviceElectricityCosts = treatment.deviceElectricityCosts ?? [];
+  const shotCartridgeCosts = treatment.shotCartridgeCosts ?? [];
+  const staffFeeCosts = treatment.staffFeeCosts ?? [];
   const disposableTotal = disposableItems.reduce((sum, item) => sum + item.amount, 0);
   const consumableTotal = consumableUsages.reduce((sum, item) => sum + item.quantityUsed * item.costPerUnit, 0);
   const materialTotal =
@@ -172,8 +175,17 @@ export function directTreatmentCost(treatment: Treatment) {
       : treatment.productMaterialCost;
   const machineTotal =
     machineItems.length > 0 ? machineItems.reduce((sum, item) => sum + item.amount, 0) : treatment.machineCostAllocation;
+  const treatmentDeviceElectricityTotal = deviceElectricityCosts
+    .filter((item) => item.includeInHpp)
+    .reduce((sum, item) => sum + item.costPerTreatment, 0);
+  const shotTotal = shotCartridgeCosts
+    .filter((item) => item.includeInHpp)
+    .reduce((sum, item) => sum + item.costPerTreatment, 0);
+  const staffFeeTotal = staffFeeCosts
+    .filter((item) => item.includeInHpp)
+    .reduce((sum, item) => sum + item.total, 0);
 
-  return disposableTotal + consumableTotal + materialTotal + machineTotal;
+  return disposableTotal + consumableTotal + materialTotal + machineTotal + treatmentDeviceElectricityTotal + shotTotal + staffFeeTotal;
 }
 
 export function commissionAmount(
@@ -203,7 +215,7 @@ export function treatmentResult(
 ) {
   const electricityPerTreatment = treatmentDeviceElectricityCost(treatment, settings);
   const directHpp = directTreatmentCost(treatment) + electricityPerTreatment;
-  const overheadAllocated = fixedCostBreakdown(settings).perMinute * treatment.durationMinutes;
+  const overheadAllocated = treatment.includeOverhead === false ? 0 : fixedCostBreakdown(settings).perMinute * treatment.durationMinutes;
   const totalCost = directHpp + overheadAllocated;
   const sellingPrice = overridePrice ?? treatmentPrice(treatment, customerType);
   const grossProfit = sellingPrice - totalCost;

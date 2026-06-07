@@ -42,6 +42,26 @@ export function treatmentHppReport(treatments: Treatment[], settings: FixedCostS
     styles: { fontSize: 8 },
     headStyles: { fillColor: [13, 75, 58] },
   });
+  const detailRows = treatments.flatMap((treatment) => {
+    const rows: (string | number)[][] = [];
+    (treatment.disposableItems ?? treatment.disposableCosts ?? []).forEach((item) => rows.push([treatment.name, "Disposable manual", item.name, "-", "-", rupiah(item.amount), item.notes ?? ""]));
+    (treatment.consumableUsages ?? []).forEach((item) => rows.push([treatment.name, "Master Bahan", item.name, item.quantityUsed, item.unit, rupiah(item.quantityUsed * item.costPerUnit), item.sourcePackageName ? `Dari paket: ${item.sourcePackageName}` : item.notes ?? ""]));
+    (treatment.materialItems ?? []).forEach((item) => rows.push([treatment.name, "Material", item.name, item.quantity, "-", rupiah(item.quantity * item.unitCost), item.notes ?? ""]));
+    (treatment.machineItems ?? []).forEach((item) => rows.push([treatment.name, "Biaya alat / mesin", item.name, "-", "-", rupiah(item.amount), item.notes ?? ""]));
+    (treatment.deviceElectricityCosts ?? []).forEach((item) => rows.push([treatment.name, "Device electricity", item.deviceName, item.durationMinutes, "menit", rupiah(item.costPerTreatment), item.includeInHpp ? "Masuk HPP" : "Tidak masuk HPP"]));
+    (treatment.shotCartridgeCosts ?? []).forEach((item) => rows.push([treatment.name, "Shot / cartridge", item.cartridgeName, item.usedPerTreatment, item.unit, rupiah(item.costPerTreatment), item.includeInHpp ? "Masuk HPP" : "Tidak masuk HPP"]));
+    (treatment.staffFeeCosts ?? []).forEach((item) => rows.push([treatment.name, "Staff fee", item.role, "-", item.type, rupiah(item.total), item.includeInHpp ? "Masuk HPP" : "Tidak masuk HPP"]));
+    return rows;
+  });
+  if (detailRows.length > 0) {
+    autoTable(doc, {
+      startY: 110,
+      head: [["Treatment", "Section", "Item", "Qty", "Unit", "Total HPP", "Notes"]],
+      body: detailRows,
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [177, 144, 66] },
+    });
+  }
   save(doc, "hera-treatment-hpp");
 }
 
