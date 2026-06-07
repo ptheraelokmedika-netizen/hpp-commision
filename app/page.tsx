@@ -23,8 +23,12 @@ import type { ElementType, ReactNode } from "react";
 import {
   buildSimulationFromProduct,
   buildSimulationFromTreatment,
+  acElectricityCost,
+  deviceElectricityCost,
+  electricitySummary,
   directTreatmentCost,
   fixedCostBreakdown,
+  fixedCostTotals,
   percent,
   productPrice,
   productResult,
@@ -32,22 +36,28 @@ import {
   selectedTier,
   treatmentPrice,
   treatmentResult,
+  staffCostTotal,
 } from "../lib/calculations";
-import { commissionReport, consumableStockReport, hppPackageReport, productProfitReport, simulationReport, treatmentHppReport } from "../lib/pdf";
-import { clearData, generateId, getData, resetData, saveData } from "../lib/storage";
+import { commissionReport, consumableStockReport, fixedCostReport, hppPackageReport, productProfitReport, simulationReport, treatmentHppReport } from "../lib/pdf";
+import { clearData, generateId, getData, normalizeFixedCostSettings, resetData, saveData } from "../lib/storage";
 import type {
   CommissionAppliesTo,
   CommissionLog,
   CommissionRule,
   CommissionType,
+  CategoryGroup,
   ConsumableCategory,
   ConsumableItem,
   ConsumableUnit,
   CustomerType,
   FixedCostSettings,
+  FixedCostMode,
+  ElectricityAcItem,
+  ElectricityDeviceItem,
   HppPackageCategory,
   HppPackageItem,
   HppPackageTemplate,
+  HppCategory,
   Product,
   SimulationRecord,
   StaffRole,
@@ -59,7 +69,7 @@ import type {
   TreatmentMaterialItem,
 } from "../lib/types";
 
-type ViewKey = "dashboard" | "fixed" | "treatments" | "consumables" | "hppPackages" | "products" | "simulation" | "logs" | "reports";
+type ViewKey = "dashboard" | "fixed" | "treatments" | "consumables" | "hppPackages" | "masterCategories" | "products" | "simulation" | "logs" | "reports";
 type PriceMode = "Normal" | "VIP" | "Promo" | "Manual";
 
 const navItems: { key: ViewKey; label: string; icon: ElementType }[] = [
@@ -68,6 +78,7 @@ const navItems: { key: ViewKey; label: string; icon: ElementType }[] = [
   { key: "treatments", label: "Treatment HPP", icon: Sparkles },
   { key: "consumables", label: "Master Bahan", icon: Package },
   { key: "hppPackages", label: "Master Paket HPP", icon: ClipboardList },
+  { key: "masterCategories", label: "Master Kategori", icon: Settings },
   { key: "products", label: "Produk / Retail", icon: Package },
   { key: "simulation", label: "Simulasi Harga", icon: Calculator },
   { key: "logs", label: "Log Komisi", icon: ClipboardList },
@@ -388,6 +399,25 @@ export default function Home() {
       });
   };
 
+  const addCategory = (group: CategoryGroup, name: string, notes = "") => {
+    const trimmed = name.trim();
+    if (!trimmed || !data) return "";
+    const duplicate = data.categories.find((item) => item.group === group && item.name.toLowerCase() === trimmed.toLowerCase());
+    if (duplicate) return duplicate.id;
+    const date = new Date().toISOString().slice(0, 10);
+    const category: HppCategory = {
+      id: `cat-${group}-${Date.now()}`,
+      group,
+      name: trimmed,
+      active: true,
+      notes,
+      createdAt: date,
+      updatedAt: date,
+    };
+    persist({ ...data, categories: [category, ...data.categories] });
+    return category.id;
+  };
+
   const clearAllData = async () => {
     if (!window.confirm("Yakin ingin mengosongkan semua data? Data treatment, produk, simulasi, log komisi, dan master bahan akan dihapus.")) return;
     const cleared = clearData();
@@ -584,7 +614,7 @@ export default function Home() {
                 setView={setView}
               />
             )}
-            {view === "fixed" && <FixedCostPage data={data} persist={persist} />}
+            {view === "fixed" && <FixedCostPage data={data} persist={persist} addCategory={addCategory} />}
             {view === "treatments" && (
               <TreatmentPage
                 data={data}
@@ -595,6 +625,7 @@ export default function Home() {
                   setSimulationItemId(id);
                   setView("simulation");
                 }}
+                addCategory={addCategory}
               />
             )}
             {view === "consumables" && (
@@ -603,6 +634,7 @@ export default function Home() {
                 persist={persist}
                 editingConsumable={editingConsumable}
                 setEditingConsumable={setEditingConsumable}
+                addCategory={addCategory}
               />
             )}
             {view === "hppPackages" && (
@@ -613,7 +645,8 @@ export default function Home() {
                 setEditingPackage={setEditingHppPackage}
               />
             )}
-            {view === "products" && <ProductPage data={data} persist={persist} editingProduct={editingProduct} setEditingProduct={setEditingProduct} />}
+            {view === "products" && <ProductPage data={data} persist={persist} editingProduct={editingProduct} setEditingProduct={setEditingProduct} addCategory={addCategory} />}
+            {view === "masterCategories" && <MasterCategoriesPage data={data} persist={persist} addCategory={addCategory} />}
             {view === "simulation" && (
               <SimulationPage
                 data={data}
@@ -711,28 +744,96 @@ function MobileBottomNav({ view, setView }: { view: ViewKey; setView: (view: Vie
   );
 }
 
-function FixedCostPage({ data, persist }: { data: StorageSchema; persist: (next: StorageSchema) => void }) {
-  const settings = data.fixedCosts;
+function FixedCostPage({ data, persist, addCategory }: { data: StorageSchema; persist: (next: StorageSchema) => void; addCategory: (group: CategoryGroup, name: string, notes?: string) => string }) {
+  const settings = normalizeFixedCostSettings(data.fixedCosts);
   const breakdown = fixedCostBreakdown(settings);
-  const update = (key: keyof FixedCostSettings, value: number) => persist({ ...data, fixedCosts: { ...settings, [key]: value } });
+  const totals = fixedCostTotals(settings);
+  const [savedMessage, setSavedMessage] = useState("");
+  const updateSettings = (next: FixedCostSettings, message = "") => {
+    persist({ ...data, fixedCosts: normalizeFixedCostSettings(next) });
+    if (message) {
+      setSavedMessage(message);
+      window.setTimeout(() => setSavedMessage(""), 2200);
+    }
+  };
+  const update = (key: keyof FixedCostSettings, value: number) => updateSettings({ ...settings, [key]: value });
 
   return (
     <div className="grid min-w-0 gap-6">
       <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="HPP tanpa cicilan" value={rupiah(breakdown.totalWithoutInstallments)} />
-        <StatCard label="Beban cicilan cashflow" value={rupiah(breakdown.installmentTotal)} tone="gold" />
-        <StatCard label="Profit after overhead + cicilan" value={rupiah(breakdown.totalWithInstallments)} tone="gold" />
+        <StatCard label="Total fixed cost included in HPP" value={rupiah(breakdown.totalWithoutInstallments)} />
+        <StatCard label="Total cashflow-only cost" value={rupiah(breakdown.cashflowOnlyTotal)} tone="gold" />
+        <StatCard label="Total excluded cost" value={rupiah(breakdown.excludedTotal)} tone="rose" />
         <StatCard label="Fixed cost per customer" value={rupiah(breakdown.perCustomer)} />
+        <StatCard label="HPP after overhead" value={rupiah(breakdown.totalWithoutInstallments)} />
+        <StatCard label="Cashflow burden" value={rupiah(breakdown.cashflowOnlyTotal)} tone="gold" />
+        <StatCard label="Profit after overhead + installment" value={rupiah(breakdown.totalWithInstallments)} tone="gold" />
+        <StatCard label="Total payroll klinik" value={rupiah(totals.payrollTotal)} />
       </div>
+      {savedMessage && <div className="rounded-lg border border-[#bdd8cb] bg-white p-3 text-sm font-semibold text-[#0d4b3a]">{savedMessage}</div>}
+
+      <Card>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-[#0d4b3a]">Staff Cost</h3>
+            <p className="mt-1 text-sm text-[#756b5d]">Gaji dihitung dari jumlah orang x gaji default + tunjangan, dengan opsi override manual.</p>
+          </div>
+          <ActionButton onClick={() => updateSettings(settings, "Pengaturan berhasil disimpan.")}><Save className="h-4 w-4" /> Save Staff Cost Settings</ActionButton>
+        </div>
+        <div className="grid gap-3">
+          {(settings.staffCosts ?? []).map((staff) => (
+            <div key={staff.id} className="grid min-w-0 gap-2 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3 md:grid-cols-[minmax(0,1fr)_90px_minmax(0,1fr)_minmax(0,1fr)_130px_130px_140px]">
+              <CategorySelect label="Role" group="staff-role" value={staff.categoryId} fallbackName={staff.role} categories={data.categories} addCategory={addCategory} onChange={(categoryId, name) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, categoryId, role: name || item.role } : item) })} />
+              <input className={inputClass()} type="number" value={staff.count} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, count: Number(event.target.value) } : item) })} placeholder="Jumlah orang" />
+              <input className={inputClass()} type="number" value={staff.salaryPerPerson} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, salaryPerPerson: Number(event.target.value) } : item) })} placeholder="Gaji per orang" />
+              <input className={inputClass()} type="number" value={staff.allowancePerPerson} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, allowancePerPerson: Number(event.target.value) } : item) })} placeholder="Tunjangan per orang" />
+              <label className="flex items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 text-sm"><input type="checkbox" checked={staff.overrideManual} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, overrideManual: event.target.checked } : item) })} /> Override total manual</label>
+              <input className={inputClass()} type="number" disabled={!staff.overrideManual} value={staff.manualTotal} onChange={(event) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, manualTotal: Number(event.target.value) } : item) })} placeholder="Total manual" />
+              <ModeSelect value={staff.mode} onChange={(mode) => updateSettings({ ...settings, staffCosts: settings.staffCosts!.map((item) => item.id === staff.id ? { ...item, mode } : item) })} />
+              <div className="md:col-span-7 text-sm font-semibold text-[#0d4b3a]">Total otomatis: {rupiah(staffCostTotal(staff))}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <StatCard label="Total payroll klinik" value={rupiah(totals.payrollTotal)} />
+          <StatCard label="Total payroll included in HPP" value={rupiah((settings.staffCosts ?? []).filter((item) => item.mode === "hpp").reduce((sum, item) => sum + staffCostTotal(item), 0))} />
+          <StatCard label="Total payroll cashflow only" value={rupiah((settings.staffCosts ?? []).filter((item) => item.mode === "cashflow").reduce((sum, item) => sum + staffCostTotal(item), 0))} tone="gold" />
+        </div>
+      </Card>
+
+      <ElectricitySettingsSection settings={settings} treatments={data.treatments} categories={data.categories} addCategory={addCategory} updateSettings={(next) => updateSettings(next, "Pengaturan berhasil disimpan.")} />
+
       <Card>
         <div className="mb-5 flex items-center justify-between gap-4">
-          <h3 className="text-lg font-semibold text-[#0d4b3a]">Pengaturan Biaya Tetap Bulanan</h3>
+          <h3 className="text-lg font-semibold text-[#0d4b3a]">Other Fixed Costs</h3>
           <Save className="h-5 w-5 shrink-0 text-[#b19042]" />
         </div>
-        <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {fixedCostFields.map((field) => (
-            <Field key={field.key} label={`${field.label}${field.installment ? " (cashflow, bukan direct HPP)" : ""}`} type="number" value={settings[field.key]} onChange={(value) => update(field.key, Number(value))} />
+        <div className="grid gap-3">
+          {fixedCostFields.filter((field) => !["listrik", "gajiDokter", "gajiTherapist", "gajiBeautician", "gajiAdmin"].includes(field.key as string)).map((field) => (
+            <FixedCostModeRow
+              key={field.key}
+              label={field.label}
+              amount={Number(settings[field.key])}
+              mode={settings.costModes?.[field.key as string] ?? (field.installment ? "cashflow" : "hpp")}
+              notes={settings.costNotes?.[field.key as string] ?? ""}
+              onAmount={(value) => update(field.key, value)}
+              onMode={(mode) => updateSettings({ ...settings, costModes: { ...(settings.costModes ?? {}), [field.key]: mode } })}
+              onNotes={(notes) => updateSettings({ ...settings, costNotes: { ...(settings.costNotes ?? {}), [field.key]: notes } })}
+              categories={data.categories}
+              categoryId={(settings.costNotes as Record<string, string> | undefined)?.[`${field.key}CategoryId`]}
+              addCategory={addCategory}
+              onCategory={(categoryId) => updateSettings({ ...settings, costNotes: { ...(settings.costNotes ?? {}), [`${field.key}CategoryId`]: categoryId } })}
+            />
           ))}
+        </div>
+      </Card>
+
+      <Card>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-[#0d4b3a]">Allocation Settings</h3>
+          <ActionButton onClick={() => updateSettings(settings, "Pengaturan berhasil disimpan.")}><Save className="h-4 w-4" /> Save Fixed Cost Settings</ActionButton>
+        </div>
+        <div className="grid min-w-0 gap-4 md:grid-cols-3">
           <Field label="Jumlah hari kerja / bulan" type="number" value={settings.workingDays} onChange={(value) => update("workingDays", Number(value))} />
           <Field label="Jam operasional / hari" type="number" value={settings.operatingHours} onChange={(value) => update("operatingHours", Number(value))} />
           <Field label="Estimasi customer / bulan" type="number" value={settings.averageCustomers} onChange={(value) => update("averageCustomers", Number(value))} />
@@ -742,14 +843,263 @@ function FixedCostPage({ data, persist }: { data: StorageSchema; persist: (next:
   );
 }
 
+function modeLabel(mode: FixedCostMode) {
+  if (mode === "hpp") return "Masuk HPP";
+  if (mode === "cashflow") return "Cashflow saja";
+  return "Tidak dihitung";
+}
+
+function ModeSelect({ value, onChange }: { value: FixedCostMode; onChange: (mode: FixedCostMode) => void }) {
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value as FixedCostMode)} className={inputClass()}>
+      <option value="hpp">Masuk HPP</option>
+      <option value="cashflow">Cashflow saja</option>
+      <option value="exclude">Tidak dihitung</option>
+    </select>
+  );
+}
+
+function FixedCostModeRow({
+  label,
+  amount,
+  mode,
+  notes,
+  categoryId,
+  categories,
+  addCategory,
+  onAmount,
+  onMode,
+  onNotes,
+  onCategory,
+}: {
+  label: string;
+  amount: number;
+  mode: FixedCostMode;
+  notes: string;
+  categoryId?: string;
+  categories: HppCategory[];
+  addCategory: (group: CategoryGroup, name: string, notes?: string) => string;
+  onAmount: (value: number) => void;
+  onMode: (mode: FixedCostMode) => void;
+  onNotes: (notes: string) => void;
+  onCategory: (categoryId: string) => void;
+}) {
+  return (
+    <div className="grid min-w-0 gap-2 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_170px_minmax(0,1fr)]">
+      <CategorySelect label="Kategori" group="fixed-cost" value={categoryId} fallbackName={label} categories={categories} addCategory={addCategory} onChange={(id) => onCategory(id)} />
+      <input className={inputClass()} type="number" value={amount} onChange={(event) => onAmount(Number(event.target.value))} />
+      <ModeSelect value={mode} onChange={onMode} />
+      <input className={inputClass()} value={notes} onChange={(event) => onNotes(event.target.value)} placeholder="Notes optional" />
+    </div>
+  );
+}
+
+function CategorySelect({
+  label,
+  group,
+  value,
+  fallbackName,
+  categories,
+  onChange,
+  addCategory,
+}: {
+  label: string;
+  group: CategoryGroup;
+  value?: string;
+  fallbackName?: string;
+  categories: HppCategory[];
+  onChange: (categoryId: string, categoryName: string) => void;
+  addCategory: (group: CategoryGroup, name: string, notes?: string) => string;
+}) {
+  const [showModal, setShowModal] = useState(false);
+  const [search, setSearch] = useState("");
+  const [newName, setNewName] = useState("");
+  const [notes, setNotes] = useState("");
+  const active = categories.filter((item) => item.group === group && item.active);
+  const selectedExists = value ? categories.some((item) => item.id === value) : false;
+  const filtered = active.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()));
+
+  const save = () => {
+    const id = addCategory(group, newName, notes);
+    if (id) onChange(id, newName.trim());
+    setShowModal(false);
+    setNewName("");
+    setNotes("");
+  };
+
+  return (
+    <label className="grid min-w-0 gap-1.5 text-sm text-[#4d473d]">
+      <span className="font-medium">{label}</span>
+      <input className={inputClass()} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari kategori" />
+      <select
+        value={selectedExists ? value : fallbackName ? `legacy:${fallbackName}` : ""}
+        onChange={(event) => {
+          if (event.target.value === "__add") {
+            setShowModal(true);
+            return;
+          }
+          if (event.target.value.startsWith("legacy:")) {
+            onChange("", event.target.value.replace("legacy:", ""));
+            return;
+          }
+          const item = categories.find((category) => category.id === event.target.value);
+          onChange(event.target.value, item?.name ?? "");
+        }}
+        className={inputClass()}
+      >
+        {!selectedExists && fallbackName && <option value={`legacy:${fallbackName}`}>{fallbackName} (custom lama)</option>}
+        <option value="">Pilih kategori</option>
+        {filtered.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        <option value="__add">+ Tambah kategori baru</option>
+      </select>
+      {showModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg border border-[#e8dcc8] bg-[#fffdf8] p-4 shadow-xl">
+            <h3 className="text-lg font-semibold text-[#0d4b3a]">Tambah Kategori</h3>
+            <p className="mt-1 text-sm text-[#756b5d]">Group: {group}</p>
+            <div className="mt-4 grid gap-3">
+              <Field label="Nama kategori" value={newName} onChange={setNewName} />
+              <Field label="Notes optional" value={notes} onChange={setNotes} />
+              <div className="flex flex-wrap justify-end gap-2">
+                <ActionButton variant="ghost" onClick={() => setShowModal(false)}>Batal</ActionButton>
+                <ActionButton onClick={save}>Save</ActionButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </label>
+  );
+}
+
+function ElectricitySettingsSection({
+  settings,
+  treatments,
+  categories,
+  addCategory,
+  updateSettings,
+}: {
+  settings: FixedCostSettings;
+  treatments: Treatment[];
+  categories: HppCategory[];
+  addCategory: (group: CategoryGroup, name: string, notes?: string) => string;
+  updateSettings: (settings: FixedCostSettings) => void;
+}) {
+  const electricity = settings.electricitySettings!;
+  const summary = electricitySummary(settings);
+  const updateElectricity = (patch: Partial<NonNullable<FixedCostSettings["electricitySettings"]>>) =>
+    updateSettings({ ...settings, electricitySettings: { ...electricity, ...patch } });
+  const updateDevice = (id: string, patch: Partial<ElectricityDeviceItem>) =>
+    updateElectricity({ devices: electricity.devices.map((item) => (item.id === id ? { ...item, ...patch } : item)) });
+  const updateAc = (id: string, patch: Partial<ElectricityAcItem>) =>
+    updateElectricity({ acItems: electricity.acItems.map((item) => (item.id === id ? { ...item, ...patch } : item)) });
+
+  return (
+    <Card>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-[#0d4b3a]">Kalkulator listrik</h3>
+          <p className="mt-1 text-sm text-[#756b5d]">Daya 7700 VA Bisnis. Tarif per kWh dapat disesuaikan berdasarkan tagihan PLN terbaru.</p>
+        </div>
+        <ActionButton onClick={() => updateSettings(settings)}><Save className="h-4 w-4" /> Save Electricity Settings</ActionButton>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Field label="Daya listrik (VA)" type="number" value={electricity.powerVa} onChange={(value) => updateElectricity({ powerVa: Number(value) })} />
+        <Field label="Golongan" value={electricity.group} onChange={(value) => updateElectricity({ group: value })} />
+        <Field label="Tarif per kWh" type="number" value={electricity.tariffPerKwh} onChange={(value) => updateElectricity({ tariffPerKwh: Number(value), devices: electricity.devices.map((item) => ({ ...item, tariffPerKwh: Number(value) })), acItems: electricity.acItems.map((item) => ({ ...item, tariffPerKwh: Number(value) })) })} />
+        <Field label="Monthly electricity fixed/manual adjustment" type="number" value={electricity.manualAdjustment} onChange={(value) => updateElectricity({ manualAdjustment: Number(value) })} />
+        <Field label="PPJ/admin fee optional" type="number" value={electricity.ppjAdminFee} onChange={(value) => updateElectricity({ ppjAdminFee: Number(value) })} />
+        <Field label="Other electricity charges optional" type="number" value={electricity.otherCharges} onChange={(value) => updateElectricity({ otherCharges: Number(value) })} />
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-[180px_180px_minmax(0,1fr)]">
+        <ModeSelect value={electricity.mode} onChange={(mode) => updateElectricity({ mode })} />
+        <label className="flex items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 text-sm"><input type="checkbox" checked={electricity.manualOverride} onChange={(event) => updateElectricity({ manualOverride: event.target.checked })} /> Override listrik manual</label>
+        <input className={inputClass()} type="number" disabled={!electricity.manualOverride} value={electricity.manualMonthlyTotal} onChange={(event) => updateElectricity({ manualMonthlyTotal: Number(event.target.value) })} placeholder="Total listrik manual" />
+      </div>
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Device electricity per treatment total" value={rupiah(electricity.devices.filter((item) => item.includeInTreatmentHpp).reduce((sum, item) => sum + deviceElectricityCost(item).costPerUse, 0))} />
+        <StatCard label="Estimated monthly device electricity" value={rupiah(summary.deviceMonthly)} />
+        <StatCard label="Estimated monthly AC electricity" value={rupiah(summary.acMonthly)} />
+        <StatCard label="Total estimated monthly electricity" value={rupiah(summary.totalMonthly)} tone="gold" />
+        <StatCard label="Electricity included in HPP" value={rupiah(summary.includedInHpp)} />
+        <StatCard label="Electricity cashflow only" value={rupiah(summary.cashflowOnly)} tone="gold" />
+        <StatCard label="Electricity excluded" value={rupiah(summary.excluded)} tone="rose" />
+      </div>
+
+      <div className="mt-6 grid gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="font-semibold text-[#0d4b3a]">Biaya listrik per tindakan</h4>
+          <ActionButton variant="ghost" onClick={() => updateElectricity({ devices: [...electricity.devices, { id: generateId("dev"), name: "Other device", watt: 0, quantity: 1, durationMinutes: 30, usagePerTreatment: 1, estimatedUsesPerMonth: 0, tariffPerKwh: electricity.tariffPerKwh, includeInTreatmentHpp: true, linkedTreatmentId: "", notes: "" }] })}><Plus className="h-4 w-4" /> Tambah alat listrik</ActionButton>
+        </div>
+        {electricity.devices.map((device) => {
+          const cost = deviceElectricityCost(device);
+          return (
+            <div key={device.id} className="grid gap-2 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
+              <div className="grid gap-2 md:grid-cols-4">
+                <CategorySelect label="Device category" group="electricity-device" value={device.categoryId} fallbackName={device.name} categories={categories} addCategory={addCategory} onChange={(categoryId) => updateDevice(device.id, { categoryId })} />
+                <input className={inputClass()} value={device.name} onChange={(event) => updateDevice(device.id, { name: event.target.value })} placeholder="Device name" />
+                <input className={inputClass()} type="number" value={device.watt} onChange={(event) => updateDevice(device.id, { watt: Number(event.target.value) })} placeholder="Watt" />
+                <input className={inputClass()} type="number" value={device.quantity} onChange={(event) => updateDevice(device.id, { quantity: Number(event.target.value) })} placeholder="Quantity" />
+                <input className={inputClass()} type="number" value={device.durationMinutes} onChange={(event) => updateDevice(device.id, { durationMinutes: Number(event.target.value) })} placeholder="Duration per use in minutes" />
+                <input className={inputClass()} type="number" value={device.usagePerTreatment} onChange={(event) => updateDevice(device.id, { usagePerTreatment: Number(event.target.value) })} placeholder="Usage per treatment" />
+                <input className={inputClass()} type="number" value={device.estimatedUsesPerMonth} onChange={(event) => updateDevice(device.id, { estimatedUsesPerMonth: Number(event.target.value) })} placeholder="Estimated uses/month" />
+                <select className={inputClass()} value={device.linkedTreatmentId ?? ""} onChange={(event) => updateDevice(device.id, { linkedTreatmentId: event.target.value })}><option value="">Linked treatment optional</option>{treatments.map((treatment) => <option key={treatment.id} value={treatment.id}>{treatment.name}</option>)}</select>
+                <label className="flex items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 text-sm"><input type="checkbox" checked={device.includeInTreatmentHpp} onChange={(event) => updateDevice(device.id, { includeInTreatmentHpp: event.target.checked })} /> Include in treatment HPP?</label>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <MiniMetric label="kWh per use" value={cost.kwhPerUse.toFixed(3)} />
+                <MiniMetric label="Rp per use" value={rupiah(cost.costPerUse)} />
+                <MiniMetric label="Rp per month estimate" value={rupiah(cost.monthlyCost)} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 grid gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="font-semibold text-[#0d4b3a]">Biaya listrik bulanan AC</h4>
+          <ActionButton variant="ghost" onClick={() => updateElectricity({ acItems: [...electricity.acItems, { id: generateId("ac"), name: "Other", pkOption: "1 PK", watt: 900, quantity: 1, hoursPerDay: 8, daysPerMonth: 26, efficiencyFactor: 1, tariffPerKwh: electricity.tariffPerKwh, mode: "hpp" }] })}><Plus className="h-4 w-4" /> Tambah AC</ActionButton>
+        </div>
+        {electricity.acItems.map((ac) => {
+          const cost = acElectricityCost(ac);
+          return (
+            <div key={ac.id} className="grid gap-2 rounded-lg border border-[#eadfce] bg-white p-3">
+              <div className="grid gap-2 md:grid-cols-4">
+                <CategorySelect label="Room category" group="ac-room" value={ac.categoryId} fallbackName={ac.name} categories={categories} addCategory={addCategory} onChange={(categoryId) => updateAc(ac.id, { categoryId })} />
+                <input className={inputClass()} value={ac.name} onChange={(event) => updateAc(ac.id, { name: event.target.value })} placeholder="AC name / room" />
+                <select className={inputClass()} value={ac.pkOption} onChange={(event) => updateAc(ac.id, { pkOption: event.target.value as ElectricityAcItem["pkOption"] })}>{["1/2 PK", "3/4 PK", "1 PK", "1.5 PK", "2 PK", "custom"].map((pk) => <option key={pk}>{pk}</option>)}</select>
+                <input className={inputClass()} type="number" value={ac.watt} onChange={(event) => updateAc(ac.id, { watt: Number(event.target.value) })} placeholder="Watt" />
+                <input className={inputClass()} type="number" value={ac.quantity} onChange={(event) => updateAc(ac.id, { quantity: Number(event.target.value) })} placeholder="Quantity" />
+                <input className={inputClass()} type="number" value={ac.hoursPerDay} onChange={(event) => updateAc(ac.id, { hoursPerDay: Number(event.target.value) })} placeholder="Hours per day" />
+                <input className={inputClass()} type="number" value={ac.daysPerMonth} onChange={(event) => updateAc(ac.id, { daysPerMonth: Number(event.target.value) })} placeholder="Days per month" />
+                <input className={inputClass()} type="number" value={ac.efficiencyFactor} onChange={(event) => updateAc(ac.id, { efficiencyFactor: Number(event.target.value) })} placeholder="Efficiency factor" />
+                <ModeSelect value={ac.mode} onChange={(mode) => updateAc(ac.id, { mode })} />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-4">
+                <MiniMetric label="Total AC kWh/month" value={cost.monthlyKwh.toFixed(2)} />
+                <MiniMetric label="Total AC cost/month" value={rupiah(cost.monthlyCost)} />
+                <MiniMetric label="Cost per operational day" value={rupiah(cost.monthlyCost / Math.max(settings.workingDays, 1))} />
+                <MiniMetric label="Cost per estimated customer" value={rupiah(cost.monthlyCost / Math.max(settings.averageCustomers, 1))} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 function TreatmentPage(props: {
   data: StorageSchema;
   persist: (next: StorageSchema) => void;
   editingTreatment: Treatment;
   setEditingTreatment: (treatment: Treatment) => void;
   openSimulation: (id: string) => void;
+  addCategory: (group: CategoryGroup, name: string, notes?: string) => string;
 }) {
-  const { data, persist, setEditingTreatment, openSimulation } = props;
+  const { data, persist, setEditingTreatment, openSimulation, addCategory } = props;
   const editingTreatment = normalizeTreatmentForEdit(props.editingTreatment);
   const [priceMode, setPriceMode] = useState<PriceMode>("Normal");
   const defaultPrice = priceMode === "VIP" ? editingTreatment.vipPrice : priceMode === "Promo" ? editingTreatment.promoPrice : editingTreatment.nonVipPrice;
@@ -783,14 +1133,14 @@ function TreatmentPage(props: {
           <div className="mt-4 grid min-w-0 gap-4">
             <div className="grid min-w-0 gap-4 md:grid-cols-3">
               <Field label="Nama treatment" value={editingTreatment.name} onChange={(value) => updateTreatment({ ...editingTreatment, name: value })} />
-              <Field label="Kategori treatment" value={editingTreatment.category} onChange={(value) => updateTreatment({ ...editingTreatment, category: value })} />
+              <CategorySelect label="Kategori treatment" group="product" fallbackName={editingTreatment.category} categories={data.categories} addCategory={addCategory} onChange={(_id, name) => updateTreatment({ ...editingTreatment, category: name })} />
               <Field label="Durasi treatment (menit)" type="number" value={editingTreatment.durationMinutes} onChange={(value) => updateTreatment({ ...editingTreatment, durationMinutes: Number(value) })} />
             </div>
 
             <HppPackageInsertSection treatment={editingTreatment} updateTreatment={updateTreatment} packages={data.hppPackages ?? []} />
-            <DynamicDisposableSection treatment={editingTreatment} updateTreatment={updateTreatment} />
+            <DynamicDisposableSection treatment={editingTreatment} updateTreatment={updateTreatment} categories={data.categories} addCategory={addCategory} />
             <DynamicConsumableUsageSection treatment={editingTreatment} updateTreatment={updateTreatment} consumables={data.consumables ?? []} />
-            <DynamicMaterialSection treatment={editingTreatment} updateTreatment={updateTreatment} />
+            <DynamicMaterialSection treatment={editingTreatment} updateTreatment={updateTreatment} categories={data.categories} addCategory={addCategory} />
             <DynamicMachineSection treatment={editingTreatment} updateTreatment={updateTreatment} />
 
             <div>
@@ -839,6 +1189,7 @@ function TreatmentPage(props: {
           <div className="mt-4 grid min-w-0 gap-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <StatCard label="Direct HPP" value={rupiah(liveResult.directHpp)} />
+              <StatCard label="Biaya listrik per tindakan" value={rupiah(liveResult.electricityPerTreatment)} tone="gold" />
               <StatCard label="Overhead per treatment" value={rupiah(liveResult.overheadAllocated)} tone="gold" />
               <StatCard label="Total cost sebelum komisi" value={rupiah(liveResult.totalCost)} />
               <StatCard label="Recommended minimum price" value={rupiah(liveResult.totalCost)} />
@@ -889,7 +1240,7 @@ function TreatmentPage(props: {
   );
 }
 
-function DynamicDisposableSection({ treatment, updateTreatment }: { treatment: Treatment; updateTreatment: (treatment: Treatment) => void }) {
+function DynamicDisposableSection({ treatment, updateTreatment, categories, addCategory }: { treatment: Treatment; updateTreatment: (treatment: Treatment) => void; categories: HppCategory[]; addCategory: (group: CategoryGroup, name: string, notes?: string) => string }) {
   const items = treatment.disposableItems ?? treatment.disposableCosts ?? [];
   const updateItem = (id: string, patch: Partial<TreatmentCostItem>) => updateTreatment({ ...treatment, disposableItems: items.map((item) => (item.id === id ? { ...item, ...patch } : item)) });
   return (
@@ -901,7 +1252,8 @@ function DynamicDisposableSection({ treatment, updateTreatment }: { treatment: T
         </ActionButton>
       </div>
       {items.map((item) => (
-        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_160px_44px]">
+        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_44px]">
+          <CategorySelect label="Kategori" group="treatment-cost" value={item.categoryId} fallbackName="Consumables" categories={categories} addCategory={addCategory} onChange={(categoryId) => updateItem(item.id, { categoryId })} />
           <input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} placeholder="Nama item" className={inputClass()} />
           <input type="number" value={item.amount} onChange={(event) => updateItem(item.id, { amount: Number(event.target.value) })} placeholder="Biaya" className={inputClass()} />
           <button type="button" onClick={() => updateTreatment({ ...treatment, disposableItems: items.filter((row) => row.id !== item.id) })} className="min-h-10 rounded-lg border border-[#e1aaa0] text-[#a33a2d]">
@@ -1090,7 +1442,7 @@ function DynamicConsumableUsageSection({
   );
 }
 
-function DynamicMaterialSection({ treatment, updateTreatment }: { treatment: Treatment; updateTreatment: (treatment: Treatment) => void }) {
+function DynamicMaterialSection({ treatment, updateTreatment, categories, addCategory }: { treatment: Treatment; updateTreatment: (treatment: Treatment) => void; categories: HppCategory[]; addCategory: (group: CategoryGroup, name: string, notes?: string) => string }) {
   const items = treatment.materialItems ?? [];
   const updateItem = (id: string, patch: Partial<TreatmentMaterialItem>) => updateTreatment({ ...treatment, materialItems: items.map((item) => (item.id === id ? { ...item, ...patch } : item)) });
   return (
@@ -1103,7 +1455,8 @@ function DynamicMaterialSection({ treatment, updateTreatment }: { treatment: Tre
       </div>
       {items.length === 0 && <EmptyState text="Belum ada material. Tambahkan serum khusus, anestesi, cartridge, atau produk lain." />}
       {items.map((item) => (
-        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_90px_140px_140px_44px]">
+        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_90px_140px_140px_44px]">
+          <CategorySelect label="Kategori" group="material" value={item.categoryId} fallbackName="Skincare / Serum" categories={categories} addCategory={addCategory} onChange={(categoryId) => updateItem(item.id, { categoryId })} />
           <input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} placeholder="Nama material" className={inputClass()} />
           <input type="number" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Number(event.target.value) })} placeholder="Qty" className={inputClass()} />
           <input type="number" value={item.unitCost} onChange={(event) => updateItem(item.id, { unitCost: Number(event.target.value) })} placeholder="Unit cost" className={inputClass()} />
@@ -1323,11 +1676,13 @@ function ConsumablesPage({
   persist,
   editingConsumable,
   setEditingConsumable,
+  addCategory,
 }: {
   data: StorageSchema;
   persist: (next: StorageSchema) => void;
   editingConsumable: ConsumableItem;
   setEditingConsumable: (item: ConsumableItem) => void;
+  addCategory: (group: CategoryGroup, name: string, notes?: string) => string;
 }) {
   const draft = normalizeConsumable(editingConsumable);
   const lowStockCount = (data.consumables ?? []).filter((item) => item.minimumStock > 0 && item.availableQuantity <= item.minimumStock).length;
@@ -1356,9 +1711,7 @@ function ConsumablesPage({
         <div className="mt-4 grid gap-4">
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Nama bahan" value={draft.name} onChange={(value) => setEditingConsumable({ ...draft, name: value })} />
-            <SelectField label="Kategori" value={draft.category} onChange={(value) => setEditingConsumable({ ...draft, category: value as ConsumableCategory })}>
-              {consumableCategories.map((category) => <option key={category}>{category}</option>)}
-            </SelectField>
+            <CategorySelect label="Kategori" group="material" value={draft.categoryId} fallbackName={draft.category} categories={data.categories} addCategory={addCategory} onChange={(categoryId, name) => setEditingConsumable({ ...draft, categoryId, category: (name || draft.category) as ConsumableCategory })} />
             <Field label="Supplier optional" value={draft.supplier ?? ""} onChange={(value) => setEditingConsumable({ ...draft, supplier: value })} />
             <Field label="Harga beli" type="number" value={draft.purchasePrice} onChange={(value) => setEditingConsumable({ ...draft, purchasePrice: Number(value) })} />
             <Field label="Stock purchase quantity optional" type="number" value={draft.purchaseQuantity} onChange={(value) => setEditingConsumable({ ...draft, purchaseQuantity: Number(value) })} />
@@ -1665,7 +2018,7 @@ function PackageItemEditor({
   );
 }
 
-function ProductPage({ data, persist, editingProduct, setEditingProduct }: { data: StorageSchema; persist: (next: StorageSchema) => void; editingProduct: Product; setEditingProduct: (product: Product) => void }) {
+function ProductPage({ data, persist, editingProduct, setEditingProduct, addCategory }: { data: StorageSchema; persist: (next: StorageSchema) => void; editingProduct: Product; setEditingProduct: (product: Product) => void; addCategory: (group: CategoryGroup, name: string, notes?: string) => string }) {
   const productRules: CommissionRule[] = (editingProduct.commissionRules ?? [{ ...editingProduct.commissionRule, appliesTo: "All" }]).map((rule) => ({
     ...rule,
     appliesTo: rule.appliesTo ?? "All",
@@ -1693,7 +2046,7 @@ function ProductPage({ data, persist, editingProduct, setEditingProduct }: { dat
         <div className="mt-4 grid min-w-0 gap-4">
           <div className="grid min-w-0 gap-4 md:grid-cols-3">
             <Field label="Nama produk" value={productDraft.name} onChange={(value) => setEditingProduct({ ...productDraft, name: value })} />
-            <Field label="Kategori" value={productDraft.category} onChange={(value) => setEditingProduct({ ...productDraft, category: value })} />
+            <CategorySelect label="Kategori" group="product" value={productDraft.categoryId} fallbackName={productDraft.category} categories={data.categories} addCategory={addCategory} onChange={(categoryId, name) => setEditingProduct({ ...productDraft, categoryId, category: name || productDraft.category })} />
             <Field label="Supplier" value={productDraft.supplier} onChange={(value) => setEditingProduct({ ...productDraft, supplier: value })} />
           </div>
           <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
@@ -1995,10 +2348,106 @@ function CommissionLogPage({ data, persist, selectedLogIds, setSelectedLogIds }:
   );
 }
 
+const categoryGroupLabels: Record<CategoryGroup, string> = {
+  "fixed-cost": "Fixed Cost Category",
+  "staff-role": "Staff Role Category",
+  "electricity-device": "Electricity Device Category",
+  "ac-room": "AC / Room Category",
+  "treatment-cost": "Treatment Cost Category",
+  material: "Material Category",
+  product: "Product Category",
+  installment: "Installment Category",
+  "other-cost": "Other Cost Category",
+};
+
+function MasterCategoriesPage({ data, persist, addCategory }: { data: StorageSchema; persist: (next: StorageSchema) => void; addCategory: (group: CategoryGroup, name: string, notes?: string) => string }) {
+  const groups = Object.keys(categoryGroupLabels) as CategoryGroup[];
+  const [activeGroup, setActiveGroup] = useState<CategoryGroup>("fixed-cost");
+  const [search, setSearch] = useState("");
+  const [name, setName] = useState("");
+  const [notes, setNotes] = useState("");
+  const filtered = data.categories.filter((item) => item.group === activeGroup && item.name.toLowerCase().includes(search.toLowerCase()));
+
+  const saveNew = () => {
+    const duplicate = data.categories.some((item) => item.group === activeGroup && item.name.toLowerCase() === name.trim().toLowerCase());
+    if (duplicate) {
+      window.alert("Kategori dengan nama yang sama sudah ada di group ini.");
+      return;
+    }
+    addCategory(activeGroup, name, notes);
+    setName("");
+    setNotes("");
+  };
+  const updateCategory = (id: string, patch: Partial<HppCategory>) => {
+    persist({
+      ...data,
+      categories: data.categories.map((item) => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString().slice(0, 10) } : item),
+    });
+  };
+
+  return (
+    <div className="grid min-w-0 gap-6">
+      <Card>
+        <h3 className="text-lg font-semibold text-[#0d4b3a]">Master Kategori</h3>
+        <div className="mt-4 flex max-w-full gap-2 overflow-x-auto">
+          {groups.map((group) => (
+            <button key={group} onClick={() => setActiveGroup(group)} className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold ${activeGroup === group ? "bg-[#0d4b3a] text-white" : "border border-[#ded2bf] bg-white text-[#0d4b3a]"}`}>
+              {categoryGroupLabels[group]}
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <Field label="Tambah Kategori" value={name} onChange={setName} />
+          <Field label="Notes" value={notes} onChange={setNotes} />
+          <div className="flex items-end"><ActionButton onClick={saveNew}><Plus className="h-4 w-4" /> Tambah Kategori</ActionButton></div>
+        </div>
+        <div className="mt-4">
+          <Field label="Cari kategori" value={search} onChange={setSearch} />
+        </div>
+      </Card>
+
+      <Card>
+        <div className="grid gap-3 md:hidden">
+          {filtered.map((item) => (
+            <div key={`cat-mobile-${item.id}`} className="rounded-lg border border-[#eadfce] bg-[#fffaf2] p-4">
+              <input className={inputClass()} value={item.name} onChange={(event) => updateCategory(item.id, { name: event.target.value })} />
+              <p className="mt-2 text-xs text-[#756b5d]">{categoryGroupLabels[item.group]}</p>
+              <input className={`${inputClass()} mt-2`} value={item.notes ?? ""} onChange={(event) => updateCategory(item.id, { notes: event.target.value })} placeholder="Notes" />
+              <div className="mt-3"><ActionButton variant={item.active ? "danger" : "secondary"} onClick={() => updateCategory(item.id, { active: !item.active })}>{item.active ? "Nonaktifkan" : "Aktifkan"}</ActionButton></div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+              <tr>{["Nama kategori", "Group", "Status", "Notes", "Action"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {filtered.map((item) => (
+                <tr key={item.id} className="border-b border-[#efe4d2]">
+                  <td className="p-3"><input className={inputClass()} value={item.name} onChange={(event) => updateCategory(item.id, { name: event.target.value })} /></td>
+                  <td className="p-3">{categoryGroupLabels[item.group]}</td>
+                  <td className="p-3">{item.active ? "Kategori aktif" : "Kategori nonaktif"}</td>
+                  <td className="p-3"><input className={inputClass()} value={item.notes ?? ""} onChange={(event) => updateCategory(item.id, { notes: event.target.value })} /></td>
+                  <td className="p-3"><ActionButton variant={item.active ? "danger" : "secondary"} onClick={() => updateCategory(item.id, { active: !item.active })}>{item.active ? "Nonaktifkan" : "Aktifkan"}</ActionButton></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 function ReportsPage({ data, selectedSimulationId }: { data: StorageSchema; selectedSimulationId: string }) {
   const selectedSimulation = data.simulations.find((item) => item.id === selectedSimulationId) ?? data.simulations[0];
   const reports = [
     { title: "Treatment HPP Report", body: "Ringkasan direct HPP, overhead durasi, harga rekomendasi, profit dan margin.", action: () => treatmentHppReport(data.treatments, data.fixedCosts) },
+    { title: "Biaya Tetap & Listrik", body: "Breakdown fixed cost, cashflow-only, excluded, payroll, listrik AC/alat, dan basis alokasi.", action: () => fixedCostReport(data.fixedCosts) },
     { title: "Price Simulation Report", body: "PDF dari simulasi harga terakhir atau simulasi yang dipilih.", action: () => selectedSimulation && simulationReport(selectedSimulation) },
     { title: "Commission Report by date range", body: "Log komisi lengkap dengan total sales, total komisi, status pembayaran, dan net profit.", action: () => commissionReport(data.commissionLogs, "Semua tanggal") },
     { title: "Product Profit Report", body: "Profit produk retail berdasarkan tier modal, harga normal, VIP, promo, dan komisi.", action: () => productProfitReport(data.products) },

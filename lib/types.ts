@@ -3,6 +3,17 @@ export type CustomerType = "Normal" | "Non VIP" | "VIP" | "Promo";
 export type CommissionAppliesTo = "Normal" | "Non VIP" | "VIP" | "Promo" | "All";
 export type CommissionType = "fixed" | "sellingPercentage" | "grossProfitPercentage" | "netBeforeCommissionPercentage" | "profitPercentage";
 export type PaymentStatus = "Belum dibayar" | "Sudah dibayar";
+export type FixedCostMode = "hpp" | "cashflow" | "exclude";
+export type CategoryGroup =
+  | "fixed-cost"
+  | "staff-role"
+  | "electricity-device"
+  | "ac-room"
+  | "treatment-cost"
+  | "material"
+  | "product"
+  | "installment"
+  | "other-cost";
 export type ConsumableCategory =
   | "Disposable"
   | "Skincare / Serum"
@@ -55,19 +66,85 @@ export type FixedCostSettings = {
   workingDays: number;
   operatingHours: number;
   averageCustomers: number;
+  costModes?: Record<string, FixedCostMode>;
+  costNotes?: Record<string, string>;
+  staffCosts?: StaffCostItem[];
+  electricitySettings?: ElectricitySettings;
+};
+
+export type StaffCostItem = {
+  id: string;
+  role: string;
+  categoryId?: string;
+  count: number;
+  salaryPerPerson: number;
+  allowancePerPerson: number;
+  mode: FixedCostMode;
+  overrideManual: boolean;
+  manualTotal: number;
+  notes?: string;
+};
+
+export type ElectricityDeviceItem = {
+  id: string;
+  categoryId?: string;
+  name: string;
+  watt: number;
+  quantity: number;
+  durationMinutes: number;
+  usagePerTreatment: number;
+  estimatedUsesPerMonth: number;
+  tariffPerKwh: number;
+  includeInTreatmentHpp: boolean;
+  linkedTreatmentId?: string;
+  notes?: string;
+};
+
+export type ElectricityAcItem = {
+  id: string;
+  categoryId?: string;
+  name: string;
+  pkOption: "1/2 PK" | "3/4 PK" | "1 PK" | "1.5 PK" | "2 PK" | "custom";
+  watt: number;
+  quantity: number;
+  hoursPerDay: number;
+  daysPerMonth: number;
+  efficiencyFactor: number;
+  tariffPerKwh: number;
+  mode: FixedCostMode;
+};
+
+export type ElectricitySettings = {
+  powerVa: number;
+  group: string;
+  tariffPerKwh: number;
+  manualAdjustment: number;
+  ppjAdminFee: number;
+  otherCharges: number;
+  useCalculatorTotal: boolean;
+  manualOverride: boolean;
+  manualMonthlyTotal: number;
+  mode: FixedCostMode;
+  notes?: string;
+  devices: ElectricityDeviceItem[];
+  acItems: ElectricityAcItem[];
 };
 
 export type TreatmentCostItem = {
   id: string;
+  categoryId?: string;
   name: string;
   amount: number;
+  notes?: string;
 };
 
 export type TreatmentMaterialItem = {
   id: string;
+  categoryId?: string;
   name: string;
   quantity: number;
   unitCost: number;
+  notes?: string;
 };
 
 export type TreatmentMachineItem = {
@@ -116,6 +193,7 @@ export type HppPackageTemplate = {
 export type ConsumableItem = {
   id: string;
   name: string;
+  categoryId?: string;
   category: ConsumableCategory;
   supplier?: string;
   purchasePrice: number;
@@ -171,6 +249,7 @@ export type ProductBuyingTier = {
 export type Product = {
   id: string;
   name: string;
+  categoryId?: string;
   category: string;
   supplier: string;
   buyingTiers: ProductBuyingTier[];
@@ -223,6 +302,16 @@ export type CommissionLog = {
   notes?: string;
 };
 
+export type HppCategory = {
+  id: string;
+  group: CategoryGroup;
+  name: string;
+  active: boolean;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StorageSchema = {
   fixedCosts: FixedCostSettings;
   treatments: Treatment[];
@@ -231,4 +320,5 @@ export type StorageSchema = {
   commissionLogs: CommissionLog[];
   consumables: ConsumableItem[];
   hppPackages: HppPackageTemplate[];
+  categories: HppCategory[];
 };

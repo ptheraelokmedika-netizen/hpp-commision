@@ -1,6 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { productResult, rupiah, treatmentResult } from "./calculations";
+import { acElectricityCost, deviceElectricityCost, fixedCostBreakdown, fixedCostTotals, productResult, rupiah, staffCostTotal, treatmentResult } from "./calculations";
 import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, Treatment } from "./types";
 
 function title(doc: jsPDF, reportTitle: string, notes?: string) {
@@ -168,4 +168,63 @@ export function hppPackageReport(packages: HppPackageTemplate[]) {
     headStyles: { fillColor: [13, 75, 58] },
   });
   save(doc, "hera-master-paket-hpp");
+}
+
+export function fixedCostReport(settings: FixedCostSettings) {
+  const doc = new jsPDF();
+  const breakdown = fixedCostBreakdown(settings);
+  const totals = fixedCostTotals(settings);
+  title(doc, "Fixed Cost & Electricity Report");
+  autoTable(doc, {
+    startY: 48,
+    head: [["Ringkasan", "Nilai"]],
+    body: [
+      ["Fixed cost included in HPP", rupiah(breakdown.totalWithoutInstallments)],
+      ["Cashflow-only cost", rupiah(breakdown.cashflowOnlyTotal)],
+      ["Excluded cost", rupiah(breakdown.excludedTotal)],
+      ["Staff salary total", rupiah(totals.payrollTotal)],
+      ["AC monthly cost", rupiah(totals.electricity.acMonthly)],
+      ["Device monthly cost", rupiah(totals.electricity.deviceMonthly)],
+      ["Total electricity estimate", rupiah(totals.electricity.totalMonthly)],
+      ["Estimated customer/month", `${settings.averageCustomers}`],
+      ["Operational days", `${settings.workingDays}`],
+      ["Working hours/day", `${settings.operatingHours}`],
+    ],
+    headStyles: { fillColor: [13, 75, 58] },
+  });
+  autoTable(doc, {
+    startY: 115,
+    head: [["Role", "Jumlah", "Gaji/orang", "Tunjangan/orang", "Mode", "Total"]],
+    body: (settings.staffCosts ?? []).map((staff) => [
+      staff.role,
+      staff.count,
+      rupiah(staff.salaryPerPerson),
+      rupiah(staff.allowancePerPerson),
+      staff.mode,
+      rupiah(staffCostTotal(staff)),
+    ]),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [13, 75, 58] },
+  });
+  autoTable(doc, {
+    startY: 170,
+    head: [["Alat", "kWh/use", "Rp/use", "Rp/month", "Linked treatment"]],
+    body: (settings.electricitySettings?.devices ?? []).map((device) => {
+      const cost = deviceElectricityCost(device);
+      return [device.name, cost.kwhPerUse.toFixed(3), rupiah(cost.costPerUse), rupiah(cost.monthlyCost), device.linkedTreatmentId ?? "-"];
+    }),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [13, 75, 58] },
+  });
+  autoTable(doc, {
+    startY: 220,
+    head: [["AC", "Mode", "kWh/month", "Rp/month"]],
+    body: (settings.electricitySettings?.acItems ?? []).map((ac) => {
+      const cost = acElectricityCost(ac);
+      return [ac.name, ac.mode, cost.monthlyKwh.toFixed(2), rupiah(cost.monthlyCost)];
+    }),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [13, 75, 58] },
+  });
+  save(doc, "hera-fixed-cost-electricity");
 }

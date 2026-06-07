@@ -1,4 +1,30 @@
-import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, Treatment } from "./types";
+import type { CategoryGroup, CommissionLog, ConsumableItem, FixedCostSettings, HppCategory, HppPackageTemplate, Product, SimulationRecord, Treatment } from "./types";
+
+const now = "2026-05-24";
+
+function makeCategories(group: CategoryGroup, names: string[]): HppCategory[] {
+  return names.map((name) => ({
+    id: `cat-${group}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`,
+    group,
+    name,
+    active: true,
+    notes: "",
+    createdAt: now,
+    updatedAt: now,
+  }));
+}
+
+export const sampleCategories: HppCategory[] = [
+  ...makeCategories("fixed-cost", ["Listrik", "Air", "Internet / Telepon", "Sewa Tempat", "Payroll / Gaji", "BPJS / Tunjangan Staff", "Cleaning / Laundry", "Maintenance Alat", "Marketing", "Software / Subscription", "Biaya Tetap Lain"]),
+  ...makeCategories("staff-role", ["Dokter", "Therapist", "Beautician", "Admin", "Apoteker", "Kasir", "Marketing", "Other Staff"]),
+  ...makeCategories("electricity-device", ["Laser / IPL", "RF", "HIFU", "PDT", "Oxyfusion", "Aquainfuse", "Sterilizer", "Autoclave", "Facial Steamer", "Other Device"]),
+  ...makeCategories("ac-room", ["Lobby", "Ruang Tindakan", "Ruang Dokter", "Facial Room", "Treatment Room", "Waiting Area", "Office", "Other Room"]),
+  ...makeCategories("treatment-cost", ["Bahan / Product", "Consumables", "Staff Fee", "Device Electricity", "Overhead Allocation", "Other Direct Cost"]),
+  ...makeCategories("material", ["Skincare / Serum", "Ampoule / Booster", "Masker", "Consumables", "Injection Supply", "Laser Consumable", "Cleaning Supply", "Other Material"]),
+  ...makeCategories("product", ["Treatment", "Retail Product", "Package / Bundle", "Add-on", "Membership", "Other Product"]),
+  ...makeCategories("installment", ["Cicilan Alat", "Cicilan Renovasi", "Cicilan Modal", "Cicilan Kendaraan", "Other Installment"]),
+  ...makeCategories("other-cost", ["Operasional", "Admin", "Bank Fee", "Pajak", "Miscellaneous"]),
+];
 
 export const sampleFixedCosts: FixedCostSettings = {
   listrik: 4500000,

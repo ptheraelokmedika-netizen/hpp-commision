@@ -7,6 +7,7 @@ import type {
   StaffRole,
   Treatment,
 } from "./types";
+import { normalizeFixedCostSettings } from "./storage";
 
 export function rupiah(value: number) {
   return new Intl.NumberFormat("id-ID", {
@@ -21,6 +22,11 @@ export function percent(value: number) {
 }
 
 export function totalFixedCost(settings: FixedCostSettings, includeInstallments = true) {
+  const normalized = normalizeFixedCostSettings(settings);
+  const breakdown = fixedCostTotals(normalized);
+  if (normalized.costModes) {
+    return includeInstallments ? breakdown.hppTotal + breakdown.cashflowTotal : breakdown.hppTotal;
+  }
   const installments = settings.cicilanAlat + settings.cicilanRenovasi + settings.cicilanLain;
   const total =
     settings.listrik +
@@ -41,9 +47,99 @@ export function totalFixedCost(settings: FixedCostSettings, includeInstallments 
   return includeInstallments ? total + installments : total;
 }
 
+export function staffCostTotal(item: NonNullable<FixedCostSettings["staffCosts"]>[number]) {
+  return item.overrideManual ? item.manualTotal : item.count * (item.salaryPerPerson + item.allowancePerPerson);
+}
+
+export function deviceElectricityCost(item: NonNullable<FixedCostSettings["electricitySettings"]>["devices"][number]) {
+  const kwhPerUse = (item.watt * item.quantity * (item.durationMinutes / 60)) / 1000;
+  const costPerUse = kwhPerUse * item.tariffPerKwh * item.usagePerTreatment;
+  return {
+    kwhPerUse,
+    costPerUse,
+    monthlyCost: costPerUse * item.estimatedUsesPerMonth,
+  };
+}
+
+export function acElectricityCost(item: NonNullable<FixedCostSettings["electricitySettings"]>["acItems"][number]) {
+  const monthlyKwh = (item.watt * item.quantity * item.hoursPerDay * item.daysPerMonth * (item.efficiencyFactor || 1)) / 1000;
+  return {
+    monthlyKwh,
+    monthlyCost: monthlyKwh * item.tariffPerKwh,
+  };
+}
+
+export function electricitySummary(settings: FixedCostSettings) {
+  const electricity = normalizeFixedCostSettings(settings).electricitySettings!;
+  const deviceMonthly = electricity.devices.reduce((sum, item) => sum + deviceElectricityCost(item).monthlyCost, 0);
+  const acMonthly = electricity.acItems.reduce((sum, item) => sum + acElectricityCost(item).monthlyCost, 0);
+  const calculatedMonthly = deviceMonthly + acMonthly + electricity.manualAdjustment + electricity.ppjAdminFee + electricity.otherCharges;
+  const totalMonthly = electricity.manualOverride ? electricity.manualMonthlyTotal : calculatedMonthly;
+  const acHpp = electricity.acItems.filter((item) => item.mode === "hpp").reduce((sum, item) => sum + acElectricityCost(item).monthlyCost, 0);
+  const acCashflow = electricity.acItems.filter((item) => item.mode === "cashflow").reduce((sum, item) => sum + acElectricityCost(item).monthlyCost, 0);
+  const acExcluded = electricity.acItems.filter((item) => item.mode === "exclude").reduce((sum, item) => sum + acElectricityCost(item).monthlyCost, 0);
+  const baseNonAc = totalMonthly - acMonthly;
+  return {
+    deviceMonthly,
+    acMonthly,
+    calculatedMonthly,
+    totalMonthly,
+    includedInHpp: electricity.mode === "hpp" ? baseNonAc + acHpp : acHpp,
+    cashflowOnly: electricity.mode === "cashflow" ? baseNonAc + acCashflow : acCashflow,
+    excluded: electricity.mode === "exclude" ? baseNonAc + acExcluded : acExcluded,
+  };
+}
+
+export function treatmentDeviceElectricityCost(treatment: Treatment, settings: FixedCostSettings) {
+  const electricity = normalizeFixedCostSettings(settings).electricitySettings!;
+  return electricity.devices
+    .filter((item) => item.includeInTreatmentHpp && item.linkedTreatmentId === treatment.id)
+    .reduce((sum, item) => sum + deviceElectricityCost(item).costPerUse, 0);
+}
+
+export function fixedCostTotals(settings: FixedCostSettings) {
+  const normalized = normalizeFixedCostSettings(settings);
+  const modes = normalized.costModes ?? {};
+  const baseCosts: { key: keyof FixedCostSettings; amount: number }[] = [
+    { key: "air", amount: normalized.air },
+    { key: "internetTelepon", amount: normalized.internetTelepon },
+    { key: "sewaTempat", amount: normalized.sewaTempat },
+    { key: "bpjsTunjangan", amount: normalized.bpjsTunjangan },
+    { key: "cleaningLaundry", amount: normalized.cleaningLaundry },
+    { key: "maintenanceAlat", amount: normalized.maintenanceAlat },
+    { key: "marketing", amount: normalized.marketing },
+    { key: "softwareSubscription", amount: normalized.softwareSubscription },
+    { key: "cicilanAlat", amount: normalized.cicilanAlat },
+    { key: "cicilanRenovasi", amount: normalized.cicilanRenovasi },
+    { key: "cicilanLain", amount: normalized.cicilanLain },
+    { key: "biayaTetapLain", amount: normalized.biayaTetapLain },
+  ];
+  const staffCosts = normalized.staffCosts ?? [];
+  const electricity = electricitySummary(normalized);
+  let hppTotal = electricity.includedInHpp;
+  let cashflowTotal = electricity.cashflowOnly;
+  let excludedTotal = electricity.excluded;
+
+  for (const cost of baseCosts) {
+    const mode = modes[cost.key as string] ?? "hpp";
+    if (mode === "hpp") hppTotal += cost.amount;
+    if (mode === "cashflow") cashflowTotal += cost.amount;
+    if (mode === "exclude") excludedTotal += cost.amount;
+  }
+  for (const staff of staffCosts) {
+    const total = staffCostTotal(staff);
+    if (staff.mode === "hpp") hppTotal += total;
+    if (staff.mode === "cashflow") cashflowTotal += total;
+    if (staff.mode === "exclude") excludedTotal += total;
+  }
+  return { hppTotal, cashflowTotal, excludedTotal, electricity, payrollTotal: staffCosts.reduce((sum, item) => sum + staffCostTotal(item), 0) };
+}
+
 export function fixedCostBreakdown(settings: FixedCostSettings) {
-  const totalWithoutInstallments = totalFixedCost(settings, false);
-  const totalWithInstallments = totalFixedCost(settings, true);
+  const normalized = normalizeFixedCostSettings(settings);
+  const totals = fixedCostTotals(normalized);
+  const totalWithoutInstallments = totals.hppTotal;
+  const totalWithInstallments = totals.hppTotal + totals.cashflowTotal;
   const workingDays = Math.max(settings.workingDays, 1);
   const operatingHours = Math.max(settings.operatingHours, 1);
   const customers = Math.max(settings.averageCustomers, 1);
@@ -52,6 +148,10 @@ export function fixedCostBreakdown(settings: FixedCostSettings) {
     totalWithoutInstallments,
     totalWithInstallments,
     installmentTotal: totalWithInstallments - totalWithoutInstallments,
+    cashflowOnlyTotal: totals.cashflowTotal,
+    excludedTotal: totals.excludedTotal,
+    payrollTotal: totals.payrollTotal,
+    electricity: totals.electricity,
     perDay: totalWithInstallments / workingDays,
     perHour: totalWithInstallments / workingDays / operatingHours,
     perMinute: totalWithInstallments / workingDays / operatingHours / 60,
@@ -101,7 +201,8 @@ export function treatmentResult(
   customerType: CustomerType,
   overridePrice?: number,
 ) {
-  const directHpp = directTreatmentCost(treatment);
+  const electricityPerTreatment = treatmentDeviceElectricityCost(treatment, settings);
+  const directHpp = directTreatmentCost(treatment) + electricityPerTreatment;
   const overheadAllocated = fixedCostBreakdown(settings).perMinute * treatment.durationMinutes;
   const totalCost = directHpp + overheadAllocated;
   const sellingPrice = overridePrice ?? treatmentPrice(treatment, customerType);
@@ -120,6 +221,7 @@ export function treatmentResult(
   return {
     sellingPrice,
     directHpp,
+    electricityPerTreatment,
     overheadAllocated,
     totalCost,
     grossProfit,

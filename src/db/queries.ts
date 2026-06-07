@@ -1,12 +1,14 @@
 import { eq, inArray } from "drizzle-orm";
 import { emptyData, initialData } from "../../lib/storage";
-import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, StorageSchema, Treatment } from "../../lib/types";
+import { normalizeFixedCostSettings } from "../../lib/storage";
+import type { CommissionLog, ConsumableItem, FixedCostSettings, HppCategory, HppPackageTemplate, Product, SimulationRecord, StorageSchema, Treatment } from "../../lib/types";
 import { getDb } from "./index";
-import { commissionLogs, consumableItems, fixedCostSettings, hppPackageTemplates, products, simulationRecords, treatments } from "./schema";
+import { commissionLogs, consumableItems, fixedCostSettings, hppCategories, hppPackageTemplates, products, simulationRecords, treatments } from "./schema";
 
 const SETTINGS_ID = "hera-clinic-default";
 
 function settingsToDb(settings: FixedCostSettings) {
+  const normalized = normalizeFixedCostSettings(settings);
   return {
     id: SETTINGS_ID,
     electricityMonthly: settings.listrik,
@@ -29,12 +31,16 @@ function settingsToDb(settings: FixedCostSettings) {
     workingDaysPerMonth: settings.workingDays,
     operatingHoursPerDay: settings.operatingHours,
     averageCustomersPerMonth: settings.averageCustomers,
+    costModes: normalized.costModes ?? {},
+    costNotes: normalized.costNotes ?? {},
+    staffCosts: normalized.staffCosts ?? [],
+    electricitySettings: normalized.electricitySettings ?? {},
     updatedAt: new Date(),
   };
 }
 
 function settingsFromDb(row: typeof fixedCostSettings.$inferSelect): FixedCostSettings {
-  return {
+  return normalizeFixedCostSettings({
     listrik: row.electricityMonthly,
     air: row.waterMonthly,
     internetTelepon: row.internetMonthly,
@@ -55,7 +61,11 @@ function settingsFromDb(row: typeof fixedCostSettings.$inferSelect): FixedCostSe
     workingDays: row.workingDaysPerMonth,
     operatingHours: row.operatingHoursPerDay,
     averageCustomers: row.averageCustomersPerMonth,
-  };
+    costModes: row.costModes as FixedCostSettings["costModes"],
+    costNotes: row.costNotes as FixedCostSettings["costNotes"],
+    staffCosts: row.staffCosts as FixedCostSettings["staffCosts"],
+    electricitySettings: row.electricitySettings as FixedCostSettings["electricitySettings"],
+  });
 }
 
 function treatmentToDb(treatment: Treatment) {
@@ -162,6 +172,29 @@ function hppPackageFromDb(row: typeof hppPackageTemplates.$inferSelect): HppPack
     description: row.description ?? undefined,
     items: (row.items as HppPackageTemplate["items"]) ?? [],
     totalCost: row.totalCost,
+    updatedAt: row.updatedAt.toISOString().slice(0, 10),
+  };
+}
+
+function categoryToDb(item: HppCategory) {
+  return {
+    id: item.id,
+    group: item.group,
+    name: item.name,
+    active: item.active,
+    notes: item.notes ?? null,
+    updatedAt: new Date(),
+  };
+}
+
+function categoryFromDb(row: typeof hppCategories.$inferSelect): HppCategory {
+  return {
+    id: row.id,
+    group: row.group as HppCategory["group"],
+    name: row.name,
+    active: row.active,
+    notes: row.notes ?? undefined,
+    createdAt: row.createdAt.toISOString().slice(0, 10),
     updatedAt: row.updatedAt.toISOString().slice(0, 10),
   };
 }
@@ -297,7 +330,7 @@ function logFromDb(row: typeof commissionLogs.$inferSelect): CommissionLog {
 
 export async function getAppData(): Promise<StorageSchema> {
   const db = getDb();
-  const [settingsRows, treatmentRows, productRows, simulationRows, logRows, consumableRows, hppPackageRows] = await Promise.all([
+  const [settingsRows, treatmentRows, productRows, simulationRows, logRows, consumableRows, hppPackageRows, categoryRows] = await Promise.all([
     db.select().from(fixedCostSettings),
     db.select().from(treatments),
     db.select().from(products),
@@ -305,6 +338,7 @@ export async function getAppData(): Promise<StorageSchema> {
     db.select().from(commissionLogs),
     db.select().from(consumableItems),
     db.select().from(hppPackageTemplates),
+    db.select().from(hppCategories),
   ]);
 
   return {
@@ -315,6 +349,7 @@ export async function getAppData(): Promise<StorageSchema> {
     commissionLogs: logRows.map(logFromDb),
     consumables: consumableRows.map(consumableFromDb),
     hppPackages: hppPackageRows.map(hppPackageFromDb),
+    categories: categoryRows.map(categoryFromDb),
   };
 }
 
@@ -327,6 +362,7 @@ export async function replaceAppData(data: StorageSchema) {
   await db.delete(commissionLogs);
   await db.delete(consumableItems);
   await db.delete(hppPackageTemplates);
+  await db.delete(hppCategories);
 
   await db.insert(fixedCostSettings).values(settingsToDb(data.fixedCosts));
   if (data.treatments.length) await db.insert(treatments).values(data.treatments.map(treatmentToDb));
@@ -335,6 +371,7 @@ export async function replaceAppData(data: StorageSchema) {
   if (data.commissionLogs.length) await db.insert(commissionLogs).values(data.commissionLogs.map(logToDb));
   if (data.consumables.length) await db.insert(consumableItems).values(data.consumables.map(consumableToDb));
   if (data.hppPackages.length) await db.insert(hppPackageTemplates).values(data.hppPackages.map(hppPackageToDb));
+  if (data.categories.length) await db.insert(hppCategories).values(data.categories.map(categoryToDb));
 }
 
 export async function clearDatabase() {

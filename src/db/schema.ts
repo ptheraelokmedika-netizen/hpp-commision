@@ -1,4 +1,4 @@
-import { integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const fixedCostSettings = pgTable("fixed_cost_settings", {
   id: text("id").primaryKey(),
@@ -22,6 +22,10 @@ export const fixedCostSettings = pgTable("fixed_cost_settings", {
   workingDaysPerMonth: integer("working_days_per_month").notNull().default(26),
   operatingHoursPerDay: integer("operating_hours_per_day").notNull().default(9),
   averageCustomersPerMonth: integer("average_customers_per_month").notNull().default(1),
+  costModes: jsonb("cost_modes").notNull().default({}),
+  costNotes: jsonb("cost_notes").notNull().default({}),
+  staffCosts: jsonb("staff_costs").notNull().default([]),
+  electricitySettings: jsonb("electricity_settings").notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -127,6 +131,16 @@ export const hppPackageTemplates = pgTable("hpp_package_templates", {
   description: text("description"),
   items: jsonb("items").notNull().default([]),
   totalCost: integer("total_cost").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const hppCategories = pgTable("hpp_categories", {
+  id: text("id").primaryKey(),
+  group: text("group").notNull(),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+  notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

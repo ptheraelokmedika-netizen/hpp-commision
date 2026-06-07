@@ -22,6 +22,20 @@
       "when": 1779611080020,
       "tag": "0002_small_otto_octavius",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780804977913,
+      "tag": "0003_square_sabretooth",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780805480396,
+      "tag": "0004_charming_peter_parker",
+      "breakpoints": true
     }
   ]
 }
