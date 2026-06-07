@@ -2061,6 +2061,7 @@ function ConsumablesPage({
   const [categoryFilter, setCategoryFilter] = useState("Semua");
   const [statusFilter, setStatusFilter] = useState("Semua");
   const [supplierFilter, setSupplierFilter] = useState("Semua");
+  const [printMode, setPrintMode] = useState<"master-bahan" | "checklist" | "opname" | null>(null);
   const [adjustingItem, setAdjustingItem] = useState<ConsumableItem | null>(null);
   const [adjustType, setAdjustType] = useState<StockAdjustment["type"]>("Tambah stok");
   const [adjustQty, setAdjustQty] = useState(0);
@@ -2083,6 +2084,13 @@ function ConsumablesPage({
       (statusFilter === "Semua" || status === statusFilter) &&
       (supplierFilter === "Semua" || (item.supplier || "Tanpa supplier") === supplierFilter);
   });
+
+  useEffect(() => {
+    if (!printMode) return;
+    const reset = () => setPrintMode(null);
+    window.addEventListener("afterprint", reset);
+    return () => window.removeEventListener("afterprint", reset);
+  }, [printMode]);
 
   const saveConsumable = () => {
     if (!draft.name.trim()) return;
@@ -2166,19 +2174,22 @@ function ConsumablesPage({
     if (window.confirm("Stok sistem akan disesuaikan dengan stok fisik. Lanjutkan?")) saveOpname("applied", true);
   };
   const printStockList = () => {
-    window.setTimeout(() => window.print(), 50);
+    setPrintMode("master-bahan");
+    window.setTimeout(() => window.print(), 100);
+  };
+  const printChecklist = () => {
+    setPrintMode("checklist");
+    window.setTimeout(() => window.print(), 100);
   };
   const printOpname = () => {
     saveOpname("finalized", false);
+    setPrintMode("opname");
     window.setTimeout(() => window.print(), 50);
   };
 
   return (
     <div className="grid min-w-0 gap-6">
-      <div className="stock-print-area">
-        <StockListPrint consumables={filteredConsumables} />
-        <StockOpnamePrint opname={opname} consumables={data.consumables} />
-      </div>
+      {printMode && <MasterBahanPrintTemplate mode={printMode} consumables={filteredConsumables} opname={opname} />}
       <div className="no-print grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
       <Card>
         <h3 className="text-lg font-semibold text-[#0d4b3a]">Master Bahan</h3>
@@ -2230,8 +2241,8 @@ function ConsumablesPage({
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-lg font-semibold text-[#0d4b3a]">Daftar Stok Bahan</h3>
             <div className="flex flex-wrap gap-2">
-              <ActionButton variant="secondary" onClick={() => consumableStockReport(filteredConsumables)}><FileDown className="h-4 w-4" /> PDF</ActionButton>
-              <ActionButton variant="ghost" onClick={printStockList}>Print / PDF Daftar Stok</ActionButton>
+              <ActionButton variant="secondary" onClick={printStockList}><FileDown className="h-4 w-4" /> Print / PDF Daftar Bahan</ActionButton>
+              <ActionButton variant="ghost" onClick={printChecklist}>Print / PDF Checklist Opname</ActionButton>
             </div>
           </div>
           <div className="mb-4 grid gap-3 md:grid-cols-4">
@@ -2458,6 +2469,105 @@ function AdjustmentHistory({ adjustments }: { adjustments: StockAdjustment[] }) 
         </div>
       )}
     </Card>
+  );
+}
+
+function MasterBahanPrintTemplate({ mode, consumables, opname }: { mode: "master-bahan" | "checklist" | "opname"; consumables: ConsumableItem[]; opname: StockOpname }) {
+  const rows = mode === "opname"
+    ? opname.items.map((item) => {
+        const material = consumables.find((candidate) => candidate.id === item.materialId);
+        return {
+          id: item.materialId,
+          name: item.materialNameSnapshot,
+          category: item.categorySnapshot,
+          supplier: material?.supplier ?? "",
+          purchasePrice: material?.purchasePrice ?? 0,
+          purchaseContent: material ? `${material.purchaseQuantity} ${material.purchaseUnit} / ${material.totalSmallestUnit} ${material.smallestUnit}` : "-",
+          smallestUnit: item.unit,
+          costPerUnit: material?.costPerSmallestUnit ?? 0,
+          systemStock: item.systemStock,
+          minimumStock: material?.minimumStock ?? 0,
+          physicalStock: item.physicalStock == null ? "" : String(item.physicalStock),
+          difference: item.physicalStock == null ? "" : String(item.difference),
+          notes: item.notes ?? "",
+        };
+      })
+    : consumables.map((item) => ({
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        supplier: item.supplier ?? "",
+        purchasePrice: item.purchasePrice,
+        purchaseContent: `${item.purchaseQuantity} ${item.purchaseUnit} / ${item.totalSmallestUnit} ${item.smallestUnit}`,
+        smallestUnit: item.stockUnit ?? item.smallestUnit,
+        costPerUnit: item.costPerSmallestUnit,
+        systemStock: item.currentStock ?? item.availableQuantity,
+        minimumStock: item.minimumStock,
+        physicalStock: "",
+        difference: "",
+        notes: "",
+      }));
+  const lowStock = consumables.filter((item) => stockStatus(item) === "Low Stock").length;
+  const emptyStock = consumables.filter((item) => stockStatus(item) === "Habis").length;
+  const inventoryValue = consumables.reduce((sum, item) => sum + Number(item.currentStock ?? item.availableQuantity ?? 0) * item.costPerSmallestUnit, 0);
+  const title = mode === "opname" ? "HASIL STOCK OPNAME" : "DAFTAR MASTER BAHAN & STOK";
+  return (
+    <section className="master-bahan-print-area print-only">
+      <div className="print-title">HERA CLINIC</div>
+      <div className="print-subtitle">HPP & Commission Calculator</div>
+      <div className="print-title">{title}</div>
+      <div className="print-subtitle">
+        Generated date: {new Date().toLocaleDateString("id-ID")}
+        {mode === "opname" ? ` | Checked by: ${opname.checkedBy || "-"} | Location: ${opname.location || "-"} | Status: ${opname.status}` : ""}
+      </div>
+      <div className="print-summary">
+        <div className="print-summary-item"><strong>Total bahan</strong><br />{rows.length}</div>
+        <div className="print-summary-item"><strong>Low stock</strong><br />{lowStock}</div>
+        <div className="print-summary-item"><strong>Habis</strong><br />{emptyStock}</div>
+        <div className="print-summary-item"><strong>Estimasi nilai stok</strong><br />{rupiah(inventoryValue)}</div>
+      </div>
+      <table className="master-bahan-print-table">
+        <colgroup>
+          <col style={{ width: "3%" }} />
+          <col style={{ width: "13%" }} />
+          <col style={{ width: "8%" }} />
+          <col style={{ width: "8%" }} />
+          <col style={{ width: "7%" }} />
+          <col style={{ width: "9%" }} />
+          <col style={{ width: "6%" }} />
+          <col style={{ width: "7%" }} />
+          <col style={{ width: "7%" }} />
+          <col style={{ width: "6%" }} />
+          <col style={{ width: mode === "checklist" ? "9%" : "7%" }} />
+          <col style={{ width: mode === "checklist" ? "8%" : "6%" }} />
+          <col style={{ width: mode === "checklist" ? "9%" : "8%" }} />
+        </colgroup>
+        <thead>
+          <tr>
+            {["No", "Nama bahan", "Kategori", "Supplier", "Harga beli", "Isi pembelian", "Unit terkecil", "Biaya/unit", "Stok sistem", "Stok minimum", "Stok fisik", "Selisih", "Catatan"].map((head) => <th key={head}>{head}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((item, index) => (
+            <tr key={item.id}>
+              <td>{index + 1}</td>
+              <td>{item.name}</td>
+              <td>{item.category}</td>
+              <td>{item.supplier}</td>
+              <td>{rupiah(item.purchasePrice)}</td>
+              <td>{item.purchaseContent}</td>
+              <td>{item.smallestUnit}</td>
+              <td>{rupiah(item.costPerUnit)}</td>
+              <td>{item.systemStock}</td>
+              <td>{item.minimumStock}</td>
+              <td style={{ height: mode === "checklist" ? 24 : undefined }}>{item.physicalStock}</td>
+              <td>{item.difference}</td>
+              <td>{item.notes}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
 
