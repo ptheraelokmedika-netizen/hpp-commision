@@ -38,7 +38,7 @@ import {
   treatmentResult,
   staffCostTotal,
 } from "../lib/calculations";
-import { commissionReport, consumableStockReport, fixedCostReport, hppPackageReport, productProfitReport, simulationReport, treatmentHppReport } from "../lib/pdf";
+import { commissionReport, consumableStockReport, exportBlankStockOpnamePdf, exportMasterBahanPdf, exportStockOpnameResultPdf, fixedCostReport, hppPackageReport, productProfitReport, simulationReport, treatmentHppReport } from "../lib/pdf";
 import { clearData, generateId, getData, normalizeFixedCostSettings, resetData, saveData } from "../lib/storage";
 import type {
   CommissionAppliesTo,
@@ -2061,7 +2061,6 @@ function ConsumablesPage({
   const [categoryFilter, setCategoryFilter] = useState("Semua");
   const [statusFilter, setStatusFilter] = useState("Semua");
   const [supplierFilter, setSupplierFilter] = useState("Semua");
-  const [printMode, setPrintMode] = useState<"master-bahan" | "checklist" | "opname" | null>(null);
   const [adjustingItem, setAdjustingItem] = useState<ConsumableItem | null>(null);
   const [adjustType, setAdjustType] = useState<StockAdjustment["type"]>("Tambah stok");
   const [adjustQty, setAdjustQty] = useState(0);
@@ -2084,13 +2083,6 @@ function ConsumablesPage({
       (statusFilter === "Semua" || status === statusFilter) &&
       (supplierFilter === "Semua" || (item.supplier || "Tanpa supplier") === supplierFilter);
   });
-
-  useEffect(() => {
-    if (!printMode) return;
-    const reset = () => setPrintMode(null);
-    window.addEventListener("afterprint", reset);
-    return () => window.removeEventListener("afterprint", reset);
-  }, [printMode]);
 
   const saveConsumable = () => {
     if (!draft.name.trim()) return;
@@ -2173,23 +2165,19 @@ function ConsumablesPage({
   const applyOpname = () => {
     if (window.confirm("Stok sistem akan disesuaikan dengan stok fisik. Lanjutkan?")) saveOpname("applied", true);
   };
-  const printStockList = () => {
-    setPrintMode("master-bahan");
-    window.setTimeout(() => window.print(), 100);
+  const exportStockList = () => {
+    exportMasterBahanPdf(filteredConsumables);
   };
-  const printChecklist = () => {
-    setPrintMode("checklist");
-    window.setTimeout(() => window.print(), 100);
+  const exportChecklist = () => {
+    exportBlankStockOpnamePdf(filteredConsumables);
   };
-  const printOpname = () => {
+  const exportOpname = () => {
     saveOpname("finalized", false);
-    setPrintMode("opname");
-    window.setTimeout(() => window.print(), 50);
+    exportStockOpnameResultPdf(opname, data.consumables);
   };
 
   return (
     <div className="grid min-w-0 gap-6">
-      {printMode && <MasterBahanPrintTemplate mode={printMode} consumables={filteredConsumables} opname={opname} />}
       <div className="no-print grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
       <Card>
         <h3 className="text-lg font-semibold text-[#0d4b3a]">Master Bahan</h3>
@@ -2241,8 +2229,8 @@ function ConsumablesPage({
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-lg font-semibold text-[#0d4b3a]">Daftar Stok Bahan</h3>
             <div className="flex flex-wrap gap-2">
-              <ActionButton variant="secondary" onClick={printStockList}><FileDown className="h-4 w-4" /> Print / PDF Daftar Bahan</ActionButton>
-              <ActionButton variant="ghost" onClick={printChecklist}>Print / PDF Checklist Opname</ActionButton>
+              <ActionButton variant="secondary" onClick={exportStockList}><FileDown className="h-4 w-4" /> PDF Daftar Stok</ActionButton>
+              <ActionButton variant="ghost" onClick={exportChecklist}>PDF Format Kosong Opname</ActionButton>
             </div>
           </div>
           <div className="mb-4 grid gap-3 md:grid-cols-4">
@@ -2314,7 +2302,7 @@ function ConsumablesPage({
         </Card>
       </div>
       </div>
-      <StockOpnameSection opname={opname} setOpname={setOpname} consumables={activeConsumables} saveDraft={() => saveOpname("draft", false)} finalize={() => saveOpname("finalized", false)} apply={applyOpname} print={printOpname} />
+      <StockOpnameSection opname={opname} setOpname={setOpname} consumables={activeConsumables} saveDraft={() => saveOpname("draft", false)} finalize={() => saveOpname("finalized", false)} apply={applyOpname} exportPdf={exportOpname} />
       <AdjustmentHistory adjustments={data.stockAdjustments ?? []} />
       {adjustingItem && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
@@ -2372,7 +2360,7 @@ function StockOpnameSection({
   saveDraft,
   finalize,
   apply,
-  print,
+  exportPdf,
 }: {
   opname: StockOpname;
   setOpname: (opname: StockOpname) => void;
@@ -2380,7 +2368,7 @@ function StockOpnameSection({
   saveDraft: () => void;
   finalize: () => void;
   apply: () => void;
-  print: () => void;
+  exportPdf: () => void;
 }) {
   useEffect(() => {
     setOpname({ ...opname, items: createStockOpname(consumables).items });
@@ -2406,7 +2394,7 @@ function StockOpnameSection({
           <ActionButton variant="ghost" onClick={saveDraft}>Save Opname Draft</ActionButton>
           <ActionButton variant="secondary" onClick={finalize}>Finalize Opname</ActionButton>
           <ActionButton onClick={apply}>Apply Adjustment to System Stock</ActionButton>
-          <ActionButton variant="secondary" onClick={print}>Print / PDF Hasil Opname</ActionButton>
+          <ActionButton variant="secondary" onClick={exportPdf}>PDF Hasil Opname</ActionButton>
         </div>
       </div>
       <div className="mb-4 grid gap-3 md:grid-cols-4">
@@ -2469,142 +2457,6 @@ function AdjustmentHistory({ adjustments }: { adjustments: StockAdjustment[] }) 
         </div>
       )}
     </Card>
-  );
-}
-
-function MasterBahanPrintTemplate({ mode, consumables, opname }: { mode: "master-bahan" | "checklist" | "opname"; consumables: ConsumableItem[]; opname: StockOpname }) {
-  const rows = mode === "opname"
-    ? opname.items.map((item) => {
-        const material = consumables.find((candidate) => candidate.id === item.materialId);
-        return {
-          id: item.materialId,
-          name: item.materialNameSnapshot,
-          category: item.categorySnapshot,
-          supplier: material?.supplier ?? "",
-          purchasePrice: material?.purchasePrice ?? 0,
-          purchaseContent: material ? `${material.purchaseQuantity} ${material.purchaseUnit} / ${material.totalSmallestUnit} ${material.smallestUnit}` : "-",
-          smallestUnit: item.unit,
-          costPerUnit: material?.costPerSmallestUnit ?? 0,
-          systemStock: item.systemStock,
-          minimumStock: material?.minimumStock ?? 0,
-          physicalStock: item.physicalStock == null ? "" : String(item.physicalStock),
-          difference: item.physicalStock == null ? "" : String(item.difference),
-          notes: item.notes ?? "",
-        };
-      })
-    : consumables.map((item) => ({
-        id: item.id,
-        name: item.name,
-        category: item.category,
-        supplier: item.supplier ?? "",
-        purchasePrice: item.purchasePrice,
-        purchaseContent: `${item.purchaseQuantity} ${item.purchaseUnit} / ${item.totalSmallestUnit} ${item.smallestUnit}`,
-        smallestUnit: item.stockUnit ?? item.smallestUnit,
-        costPerUnit: item.costPerSmallestUnit,
-        systemStock: item.currentStock ?? item.availableQuantity,
-        minimumStock: item.minimumStock,
-        physicalStock: "",
-        difference: "",
-        notes: "",
-      }));
-  const lowStock = consumables.filter((item) => stockStatus(item) === "Low Stock").length;
-  const emptyStock = consumables.filter((item) => stockStatus(item) === "Habis").length;
-  const inventoryValue = consumables.reduce((sum, item) => sum + Number(item.currentStock ?? item.availableQuantity ?? 0) * item.costPerSmallestUnit, 0);
-  const title = mode === "opname" ? "HASIL STOCK OPNAME" : "DAFTAR MASTER BAHAN & STOK";
-  return (
-    <section className="master-bahan-print-area print-only">
-      <div className="print-title">HERA CLINIC</div>
-      <div className="print-subtitle">HPP & Commission Calculator</div>
-      <div className="print-title">{title}</div>
-      <div className="print-subtitle">
-        Generated date: {new Date().toLocaleDateString("id-ID")}
-        {mode === "opname" ? ` | Checked by: ${opname.checkedBy || "-"} | Location: ${opname.location || "-"} | Status: ${opname.status}` : ""}
-      </div>
-      <div className="print-summary">
-        <div className="print-summary-item"><strong>Total bahan</strong><br />{rows.length}</div>
-        <div className="print-summary-item"><strong>Low stock</strong><br />{lowStock}</div>
-        <div className="print-summary-item"><strong>Habis</strong><br />{emptyStock}</div>
-        <div className="print-summary-item"><strong>Estimasi nilai stok</strong><br />{rupiah(inventoryValue)}</div>
-      </div>
-      <table className="master-bahan-print-table">
-        <colgroup>
-          <col style={{ width: "3%" }} />
-          <col style={{ width: "13%" }} />
-          <col style={{ width: "8%" }} />
-          <col style={{ width: "8%" }} />
-          <col style={{ width: "7%" }} />
-          <col style={{ width: "9%" }} />
-          <col style={{ width: "6%" }} />
-          <col style={{ width: "7%" }} />
-          <col style={{ width: "7%" }} />
-          <col style={{ width: "6%" }} />
-          <col style={{ width: mode === "checklist" ? "9%" : "7%" }} />
-          <col style={{ width: mode === "checklist" ? "8%" : "6%" }} />
-          <col style={{ width: mode === "checklist" ? "9%" : "8%" }} />
-        </colgroup>
-        <thead>
-          <tr>
-            {["No", "Nama bahan", "Kategori", "Supplier", "Harga beli", "Isi pembelian", "Unit terkecil", "Biaya/unit", "Stok sistem", "Stok minimum", "Stok fisik", "Selisih", "Catatan"].map((head) => <th key={head}>{head}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((item, index) => (
-            <tr key={item.id}>
-              <td>{index + 1}</td>
-              <td>{item.name}</td>
-              <td>{item.category}</td>
-              <td>{item.supplier}</td>
-              <td>{rupiah(item.purchasePrice)}</td>
-              <td>{item.purchaseContent}</td>
-              <td>{item.smallestUnit}</td>
-              <td>{rupiah(item.costPerUnit)}</td>
-              <td>{item.systemStock}</td>
-              <td>{item.minimumStock}</td>
-              <td style={{ height: mode === "checklist" ? 24 : undefined }}>{item.physicalStock}</td>
-              <td>{item.difference}</td>
-              <td>{item.notes}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
-  );
-}
-
-function StockListPrint({ consumables }: { consumables: ConsumableItem[] }) {
-  return (
-    <section className="p-2 text-black">
-      <h1 className="text-xl font-bold">HERA CLINIC</h1>
-      <p>HPP & Commission Calculator</p>
-      <h2 className="mt-3 text-lg font-semibold">Daftar Stok Bahan</h2>
-      <p className="mb-4 text-sm">Date generated: {new Date().toLocaleDateString("id-ID")}</p>
-      <table className="w-full border-collapse text-xs">
-        <thead><tr>{["No", "Nama bahan", "Kategori", "Supplier", "Stok sistem", "Unit", "Stok minimum", "Stok fisik", "Selisih", "Catatan"].map((head) => <th key={head} className="border border-black p-1 text-left">{head}</th>)}</tr></thead>
-        <tbody>{consumables.map((item, index) => <tr key={item.id}><td className="border border-black p-1">{index + 1}</td><td className="border border-black p-1">{item.name}</td><td className="border border-black p-1">{item.category}</td><td className="border border-black p-1">{item.supplier || ""}</td><td className="border border-black p-1">{item.currentStock ?? item.availableQuantity}</td><td className="border border-black p-1">{item.stockUnit ?? item.smallestUnit}</td><td className="border border-black p-1">{item.minimumStock}</td><td className="border border-black p-1 h-7"></td><td className="border border-black p-1"></td><td className="border border-black p-1"></td></tr>)}</tbody>
-      </table>
-    </section>
-  );
-}
-
-function StockOpnamePrint({ opname, consumables }: { opname: StockOpname; consumables: ConsumableItem[] }) {
-  const rows = opname.items.length ? opname.items : createStockOpname(consumables).items;
-  const totalValueDiff = rows.reduce((sum, row) => {
-    const material = consumables.find((item) => item.id === row.materialId);
-    return sum + row.difference * (material?.costPerSmallestUnit ?? 0);
-  }, 0);
-  const count = (status: StockOpnameItem["status"]) => rows.filter((item) => item.status === status).length;
-  return (
-    <section className="mt-8 p-2 text-black">
-      <h1 className="text-xl font-bold">HERA CLINIC</h1>
-      <h2 className="mt-3 text-lg font-semibold">Hasil Stock Opname</h2>
-      <p className="text-sm">Date: {opname.date} | Checked by: {opname.checkedBy || "-"} | Location: {opname.location || "-"} | Status: {opname.status}</p>
-      <p className="my-3 text-sm">Total item: {rows.length} | Sesuai: {count("Sesuai")} | Selisih kurang: {count("Selisih kurang")} | Selisih lebih: {count("Selisih lebih")} | Belum diisi: {count("Belum diisi")} | Est. value diff: {rupiah(totalValueDiff)}</p>
-      <table className="w-full border-collapse text-xs">
-        <thead><tr>{["No", "Nama bahan", "Kategori", "Stok sistem", "Stok fisik", "Selisih", "Unit", "Status", "Catatan"].map((head) => <th key={head} className="border border-black p-1 text-left">{head}</th>)}</tr></thead>
-        <tbody>{rows.map((item, index) => <tr key={item.materialId}><td className="border border-black p-1">{index + 1}</td><td className="border border-black p-1">{item.materialNameSnapshot}</td><td className="border border-black p-1">{item.categorySnapshot}</td><td className="border border-black p-1">{item.systemStock}</td><td className="border border-black p-1">{item.physicalStock ?? ""}</td><td className="border border-black p-1">{item.physicalStock == null ? "" : item.difference}</td><td className="border border-black p-1">{item.unit}</td><td className="border border-black p-1">{item.status}</td><td className="border border-black p-1">{item.notes ?? ""}</td></tr>)}</tbody>
-      </table>
-      <div className="mt-12 grid grid-cols-2 gap-12 text-center text-sm"><div>Checked by<br /><br /><br />__________________</div><div>Supervisor/Admin<br /><br /><br />__________________</div></div>
-    </section>
   );
 }
 

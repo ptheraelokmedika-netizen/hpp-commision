@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { acElectricityCost, deviceElectricityCost, fixedCostBreakdown, fixedCostTotals, productResult, rupiah, staffCostTotal, treatmentResult } from "./calculations";
-import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, Treatment } from "./types";
+import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, StockOpname, StockOpnameItem, Treatment } from "./types";
 
 function title(doc: jsPDF, reportTitle: string, notes?: string) {
   doc.setFillColor(13, 75, 58);
@@ -19,6 +19,229 @@ function title(doc: jsPDF, reportTitle: string, notes?: string) {
 
 function save(doc: jsPDF, name: string) {
   doc.save(`${name}-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+export function formatCurrency(value: number) {
+  return rupiah(value || 0);
+}
+
+export function formatDate(value?: string | Date) {
+  const date = value ? new Date(value) : new Date();
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleDateString("id-ID");
+}
+
+export function safeText(value: unknown) {
+  if (value === null || value === undefined || value === "") return "-";
+  return String(value);
+}
+
+function addPdfHeader(doc: jsPDF, reportTitle: string, orientation: "portrait" | "landscape" = "portrait", lines: string[] = []) {
+  const width = orientation === "landscape" ? 297 : 210;
+  doc.setTextColor(13, 75, 58);
+  doc.setFontSize(15);
+  doc.setFont("helvetica", "bold");
+  doc.text("HERA CLINIC", 12, 12);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text("HPP & Commission Calculator", 12, 18);
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.text(reportTitle, 12, 28);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(46, 45, 40);
+  doc.text(`Generated date: ${formatDate()}`, 12, 34);
+  lines.forEach((line, index) => doc.text(line, 12, 40 + index * 5));
+  doc.setDrawColor(216, 182, 95);
+  doc.line(12, 22, width - 12, 22);
+}
+
+function addPageNumber(doc: jsPDF) {
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    const width = doc.internal.pageSize.getWidth();
+    const height = doc.internal.pageSize.getHeight();
+    doc.setFontSize(7);
+    doc.setTextColor(110, 105, 96);
+    doc.text(`Page ${page} of ${pageCount}`, width - 28, height - 8);
+  }
+}
+
+function addPdfFooter(doc: jsPDF) {
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    const height = doc.internal.pageSize.getHeight();
+    doc.setFontSize(7);
+    doc.setTextColor(110, 105, 96);
+    doc.text(`Generated: ${new Date().toLocaleString("id-ID")}`, 12, height - 8);
+  }
+  addPageNumber(doc);
+}
+
+function stockStatus(item: ConsumableItem) {
+  const stock = Number(item.currentStock ?? item.availableQuantity ?? 0);
+  if (stock <= 0) return "Habis";
+  if ((item.minimumStock ?? 0) > 0 && stock <= item.minimumStock) return "Low Stock";
+  return "Aman";
+}
+
+function masterBahanRows(materials: ConsumableItem[], blankRows = 0) {
+  const rows = materials.map((item, index) => [
+    index + 1,
+    safeText(item.name),
+    safeText(item.category),
+    safeText(item.supplier),
+    formatCurrency(item.purchasePrice),
+    `${item.purchaseQuantity} ${item.purchaseUnit} / ${item.totalSmallestUnit} ${item.smallestUnit}`,
+    safeText(item.stockUnit ?? item.smallestUnit),
+    formatCurrency(item.costPerSmallestUnit),
+    `${item.currentStock ?? item.availableQuantity ?? 0}`,
+    `${item.minimumStock ?? 0}`,
+    "",
+    "",
+    "",
+  ]);
+  if (rows.length === 0) {
+    return Array.from({ length: blankRows }, (_, index) => [index + 1, "", "", "", "", "", "", "", "", "", "", "", ""]);
+  }
+  return rows;
+}
+
+export function exportMasterBahanPdf(materials: ConsumableItem[]) {
+  if (materials.length === 0) {
+    exportBlankStockOpnamePdf(materials);
+    return;
+  }
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const lowStock = materials.filter((item) => stockStatus(item) === "Low Stock").length;
+  const emptyStock = materials.filter((item) => stockStatus(item) === "Habis").length;
+  const inventoryValue = materials.reduce((sum, item) => sum + Number(item.currentStock ?? item.availableQuantity ?? 0) * item.costPerSmallestUnit, 0);
+  addPdfHeader(doc, "DAFTAR MASTER BAHAN & STOK", "landscape", ["Report: Daftar Master Bahan & Stok"]);
+  autoTable(doc, {
+    startY: 45,
+    body: [[
+      `Jumlah master bahan: ${materials.length}`,
+      `Bahan low stock: ${lowStock}`,
+      `Bahan habis: ${emptyStock}`,
+      `Estimasi nilai stok: ${formatCurrency(inventoryValue)}`,
+    ]],
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 2, textColor: [46, 45, 40] },
+    columnStyles: { 0: { fontStyle: "bold" }, 1: { fontStyle: "bold" }, 2: { fontStyle: "bold" }, 3: { fontStyle: "bold" } },
+  });
+  autoTable(doc, {
+    startY: ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 55) + 5,
+    head: [["No", "Nama bahan", "Kategori", "Supplier", "Harga beli", "Isi pembelian", "Unit terkecil", "Biaya/unit", "Stok sistem", "Stok minimum", "Stok fisik", "Selisih", "Catatan"]],
+    body: masterBahanRows(materials),
+    theme: "grid",
+    styles: { fontSize: 7, cellPadding: 1.6, overflow: "linebreak", valign: "middle", lineColor: [190, 184, 174], lineWidth: 0.1 },
+    headStyles: { fillColor: [241, 234, 220], textColor: [13, 75, 58], fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [253, 250, 244] },
+    columnStyles: {
+      0: { cellWidth: 8, halign: "center" },
+      4: { halign: "right" },
+      7: { halign: "right" },
+      8: { halign: "right" },
+      9: { halign: "right" },
+      10: { cellWidth: 18 },
+      11: { cellWidth: 16 },
+      12: { cellWidth: 26 },
+    },
+  });
+  addPdfFooter(doc);
+  doc.save(`master-bahan-stok-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+export function exportBlankStockOpnamePdf(materials: ConsumableItem[] = []) {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  addPdfHeader(doc, "FORMAT STOCK OPNAME BAHAN", "landscape", [
+    "Tanggal cek: ____________________",
+    "Petugas cek: ____________________    Lokasi: ____________________",
+  ]);
+  const rows = materials.length
+    ? materials.map((item, index) => [
+        index + 1,
+        item.name,
+        item.category,
+        item.supplier ?? "-",
+        item.stockUnit ?? item.smallestUnit,
+        `${item.currentStock ?? item.availableQuantity ?? 0}`,
+        "",
+        "",
+        "",
+      ])
+    : Array.from({ length: 20 }, (_, index) => [index + 1, "", "", "", "", "", "", "", ""]);
+  autoTable(doc, {
+    startY: 52,
+    head: [["No", "Nama bahan", "Kategori", "Supplier", "Satuan", "Stok sistem", "Stok fisik", "Selisih", "Catatan"]],
+    body: rows,
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 2.2, minCellHeight: 8, overflow: "linebreak", valign: "middle", lineColor: [160, 160, 160], lineWidth: 0.1 },
+    headStyles: { fillColor: [241, 234, 220], textColor: [13, 75, 58], fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 9, halign: "center" },
+      6: { cellWidth: 24 },
+      7: { cellWidth: 22 },
+      8: { cellWidth: 44 },
+    },
+  });
+  const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 170;
+  doc.setFontSize(9);
+  doc.text("Diperiksa oleh: ____________________", 20, Math.min(finalY + 18, 195));
+  doc.text("Disetujui oleh: ____________________", 160, Math.min(finalY + 18, 195));
+  addPdfFooter(doc);
+  doc.save(`format-stock-opname-kosong-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+export function exportStockOpnameResultPdf(opname: StockOpname, materials: ConsumableItem[] = []) {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  addPdfHeader(doc, "HASIL STOCK OPNAME", "landscape", [
+    `Tanggal: ${safeText(opname.date)}    Petugas: ${safeText(opname.checkedBy)}    Lokasi: ${safeText(opname.location)}    Status: ${safeText(opname.status)}`,
+  ]);
+  const count = (status: StockOpnameItem["status"]) => opname.items.filter((item) => item.status === status).length;
+  const valueDiff = opname.items.reduce((sum, item) => {
+    const material = materials.find((candidate) => candidate.id === item.materialId);
+    return sum + (item.difference || 0) * (material?.costPerSmallestUnit ?? 0);
+  }, 0);
+  autoTable(doc, {
+    startY: 45,
+    body: [[
+      `Total item: ${opname.items.length}`,
+      `Sesuai: ${count("Sesuai")}`,
+      `Selisih kurang: ${count("Selisih kurang")}`,
+      `Selisih lebih: ${count("Selisih lebih")}`,
+      `Belum diisi: ${count("Belum diisi")}`,
+      `Estimasi nilai selisih: ${formatCurrency(valueDiff)}`,
+    ]],
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 2 },
+  });
+  autoTable(doc, {
+    startY: ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 55) + 5,
+    head: [["No", "Nama bahan", "Kategori", "Stok sistem", "Stok fisik", "Selisih", "Unit", "Status", "Catatan"]],
+    body: opname.items.map((item, index) => [
+      index + 1,
+      item.materialNameSnapshot,
+      item.categorySnapshot,
+      item.systemStock,
+      item.physicalStock ?? "",
+      item.physicalStock == null ? "" : item.difference,
+      item.unit,
+      item.status,
+      item.notes ?? "",
+    ]),
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 2, overflow: "linebreak", valign: "middle", lineColor: [190, 184, 174], lineWidth: 0.1 },
+    headStyles: { fillColor: [241, 234, 220], textColor: [13, 75, 58], fontStyle: "bold" },
+  });
+  const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 170;
+  doc.setFontSize(9);
+  doc.text("Checked by: ____________________", 20, Math.min(finalY + 18, 195));
+  doc.text("Supervisor/Admin: ____________________", 160, Math.min(finalY + 18, 195));
+  addPdfFooter(doc);
+  doc.save(`hasil-stock-opname-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 export function treatmentHppReport(treatments: Treatment[], settings: FixedCostSettings) {
@@ -141,29 +364,7 @@ export function productProfitReport(products: Product[]) {
 }
 
 export function consumableStockReport(consumables: ConsumableItem[]) {
-  const doc = new jsPDF();
-  title(doc, "Master Bahan & Stok");
-  autoTable(doc, {
-    startY: 48,
-    head: [["Nama bahan", "Supplier", "Harga beli", "Unit terkecil", "Biaya/unit", "Stok tersedia", "Nilai stok", "Status"]],
-    body: consumables.map((item) => {
-      const stockValue = item.availableQuantity * item.costPerSmallestUnit;
-      const low = item.minimumStock > 0 && item.availableQuantity <= item.minimumStock;
-      return [
-        item.name,
-        item.supplier ?? "-",
-        rupiah(item.purchasePrice),
-        item.smallestUnit,
-        rupiah(item.costPerSmallestUnit),
-        `${item.availableQuantity} ${item.smallestUnit}`,
-        rupiah(stockValue),
-        low ? "Low stock" : "Aman",
-      ];
-    }),
-    styles: { fontSize: 8 },
-    headStyles: { fillColor: [13, 75, 58] },
-  });
-  save(doc, "hera-master-bahan-stok");
+  exportMasterBahanPdf(consumables);
 }
 
 export function hppPackageReport(packages: HppPackageTemplate[]) {
