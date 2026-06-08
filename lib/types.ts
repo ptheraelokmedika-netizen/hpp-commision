@@ -2,6 +2,10 @@ export type StaffRole = "dokter" | "therapist" | "beautician" | "sales" | "admin
 export type CustomerType = "Normal" | "Non VIP" | "VIP" | "Promo";
 export type CommissionAppliesTo = "Normal" | "Non VIP" | "VIP" | "Promo" | "All";
 export type CommissionType = "fixed" | "sellingPercentage" | "grossProfitPercentage" | "netBeforeCommissionPercentage" | "profitPercentage";
+export type HeraStaffRole = "Dokter" | "Beautician" | "Nurse / Perawat" | "Sales / Promoter" | "Admin" | "Therapist" | "Other";
+export type HeraCommissionMode = "no_commission" | "percent_final_price" | "nominal_adjusted_by_discount" | "fixed_nominal";
+export type CommissionDraftStatus = "draft" | "approved" | "rejected";
+export type StaffStatus = "active" | "inactive";
 export type PaymentStatus = "Belum dibayar" | "Sudah dibayar";
 export type FixedCostMode = "hpp" | "cashflow" | "exclude";
 export type CategoryGroup =
@@ -290,6 +294,78 @@ export type StockOpname = {
   updatedAt: string;
 };
 
+export type StaffDirectoryItem = {
+  id: string;
+  staffCode: string;
+  name: string;
+  role: HeraStaffRole;
+  status: StaffStatus;
+  phone?: string;
+  notes?: string;
+  defaultCommissionEligible: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StaffRoleCategory = {
+  id: string;
+  name: HeraStaffRole | string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HeraCommissionRule = {
+  id: string;
+  role: HeraStaffRole;
+  mode: HeraCommissionMode;
+  percent: number;
+  nominal: number;
+  notes?: string;
+  active: boolean;
+};
+
+export type StaffHandlerSelection = {
+  doctorId?: string;
+  beautician1Id?: string;
+  beautician2Id?: string;
+  beauticianSplit: "equal" | "beautician1" | "beautician2" | "custom";
+  beautician1Percent: number;
+  beautician2Percent: number;
+  nurseId?: string;
+  salesId?: string;
+  manualDoctorName?: string;
+  manualBeautician1Name?: string;
+  manualBeautician2Name?: string;
+  manualNurseName?: string;
+  manualSalesName?: string;
+};
+
+export type CommissionDraft = {
+  id: string;
+  transactionDate: string;
+  invoiceNumber: string;
+  patientName?: string;
+  itemName: string;
+  treatmentId?: string;
+  staffId?: string;
+  staffNameSnapshot: string;
+  role: HeraStaffRole;
+  commissionMode: HeraCommissionMode;
+  baseAmount: number;
+  normalPrice: number;
+  finalAllocatedAmount: number;
+  percent: number;
+  nominal: number;
+  calculatedCommission: number;
+  hppCost: number;
+  estimatedProfit: number;
+  status: CommissionDraftStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CommissionRule = {
   id: string;
   role: StaffRole;
@@ -324,6 +400,7 @@ export type Treatment = {
   promoPrice: number;
   targetMarginPercent: number;
   commissionRules: CommissionRule[];
+  heraCommissionRules?: HeraCommissionRule[];
   notes?: string;
 };
 
@@ -346,6 +423,7 @@ export type Product = {
   promoPrice: number;
   commissionRule: Omit<CommissionRule, "appliesTo">;
   commissionRules?: CommissionRule[];
+  heraCommissionRules?: HeraCommissionRule[];
   stockQuantity?: number;
 };
 
@@ -408,6 +486,10 @@ export type StorageSchema = {
   consumables: ConsumableItem[];
   stockAdjustments: StockAdjustment[];
   stockOpnames: StockOpname[];
+  staffDirectory: StaffDirectoryItem[];
+  staffRoles: StaffRoleCategory[];
+  commissionDrafts: CommissionDraft[];
+  commissionHistory: CommissionDraft[];
   hppPackages: HppPackageTemplate[];
   categories: HppCategory[];
 };

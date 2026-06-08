@@ -1,5 +1,5 @@
 import { sampleCategories, sampleCommissionLogs, sampleConsumables, sampleFixedCosts, sampleHppPackages, sampleProducts, sampleSimulations, sampleTreatments } from "./sample-data";
-import type { CategoryGroup, ElectricitySettings, FixedCostMode, FixedCostSettings, HppCategory, StaffCostItem, StorageSchema } from "./types";
+import type { CategoryGroup, ElectricitySettings, FixedCostMode, FixedCostSettings, HeraStaffRole, HppCategory, StaffCostItem, StaffDirectoryItem, StaffRoleCategory, StorageSchema } from "./types";
 
 const STORAGE_KEY = "hera-clinic-hpp-commission";
 
@@ -12,6 +12,10 @@ export const initialData: StorageSchema = {
   consumables: sampleConsumables,
   stockAdjustments: [],
   stockOpnames: [],
+  staffDirectory: defaultStaffDirectory(),
+  staffRoles: defaultStaffRoles(),
+  commissionDrafts: [],
+  commissionHistory: [],
   hppPackages: sampleHppPackages,
   categories: sampleCategories,
 };
@@ -46,9 +50,28 @@ export const emptyData: StorageSchema = {
   consumables: [],
   stockAdjustments: [],
   stockOpnames: [],
+  staffDirectory: [],
+  staffRoles: defaultStaffRoles(),
+  commissionDrafts: [],
+  commissionHistory: [],
   hppPackages: [],
   categories: [],
 };
+
+function defaultStaffRoles(): StaffRoleCategory[] {
+  const date = new Date().toISOString().slice(0, 10);
+  const roles: HeraStaffRole[] = ["Dokter", "Beautician", "Nurse / Perawat", "Sales / Promoter", "Admin", "Therapist", "Other"];
+  return roles.map((role) => ({ id: `role-${role.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: role, active: true, createdAt: date, updatedAt: date }));
+}
+
+function defaultStaffDirectory(): StaffDirectoryItem[] {
+  const date = new Date().toISOString().slice(0, 10);
+  return [
+    { id: "staff-hera-001", staffCode: "STF-001", name: "Dokter Hera", role: "Dokter", status: "active", defaultCommissionEligible: true, notes: "Sample dokter", createdAt: date, updatedAt: date },
+    { id: "staff-hera-002", staffCode: "STF-002", name: "Beautician Hera", role: "Beautician", status: "active", defaultCommissionEligible: true, notes: "Sample beautician", createdAt: date, updatedAt: date },
+    { id: "staff-hera-003", staffCode: "STF-003", name: "Sales Hera", role: "Sales / Promoter", status: "active", defaultCommissionEligible: true, notes: "Sample sales", createdAt: date, updatedAt: date },
+  ];
+}
 
 const defaultCostModes: Record<string, FixedCostMode> = {
   listrik: "hpp",
@@ -179,6 +202,7 @@ function normalizeData(data: StorageSchema): StorageSchema {
         quantity: rule.quantity ?? 1,
         appliesTo: rule.appliesTo === "Non VIP" ? "Normal" : rule.appliesTo,
       })),
+      heraCommissionRules: treatment.heraCommissionRules ?? [],
     })),
     products: data.products.map((product) => ({
       ...product,
@@ -196,6 +220,7 @@ function normalizeData(data: StorageSchema): StorageSchema {
           appliesTo: normalizedRule.appliesTo ?? "All",
         };
       }),
+      heraCommissionRules: product.heraCommissionRules ?? [],
     })),
     consumables: (data.consumables ?? []).map((item) => {
       const purchaseQuantity = item.purchaseQuantity ?? 1;
@@ -219,6 +244,17 @@ function normalizeData(data: StorageSchema): StorageSchema {
     }),
     stockAdjustments: data.stockAdjustments ?? [],
     stockOpnames: data.stockOpnames ?? [],
+    staffDirectory: (data.staffDirectory ?? []).map((staff, index) => ({
+      ...staff,
+      staffCode: staff.staffCode || `STF-${String(index + 1).padStart(3, "0")}`,
+      status: staff.status ?? "active",
+      defaultCommissionEligible: staff.defaultCommissionEligible ?? true,
+      createdAt: staff.createdAt ?? new Date().toISOString().slice(0, 10),
+      updatedAt: staff.updatedAt ?? new Date().toISOString().slice(0, 10),
+    })),
+    staffRoles: data.staffRoles?.length ? data.staffRoles : defaultStaffRoles(),
+    commissionDrafts: data.commissionDrafts ?? [],
+    commissionHistory: data.commissionHistory ?? [],
     hppPackages: (data.hppPackages ?? []).map((item) => ({
       ...item,
       items: item.items ?? [],

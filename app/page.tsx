@@ -38,10 +38,11 @@ import {
   treatmentResult,
   staffCostTotal,
 } from "../lib/calculations";
-import { commissionReport, consumableStockReport, exportBlankStockOpnamePdf, exportMasterBahanPdf, exportStockOpnameResultPdf, fixedCostReport, hppPackageReport, productProfitReport, simulationReport, treatmentHppReport } from "../lib/pdf";
+import { commissionDraftReport, commissionReport, consumableStockReport, exportBlankStockOpnamePdf, exportMasterBahanPdf, exportStockOpnameResultPdf, fixedCostReport, hppPackageReport, productProfitReport, simulationReport, staffCommissionStatement, treatmentHppReport } from "../lib/pdf";
 import { clearData, generateId, getData, normalizeFixedCostSettings, resetData, saveData } from "../lib/storage";
 import type {
   CommissionAppliesTo,
+  CommissionDraft,
   CommissionLog,
   CommissionRule,
   CommissionType,
@@ -52,6 +53,9 @@ import type {
   CustomerType,
   FixedCostSettings,
   FixedCostMode,
+  HeraCommissionMode,
+  HeraCommissionRule,
+  HeraStaffRole,
   ElectricityAcItem,
   ElectricityDeviceItem,
   HppPackageCategory,
@@ -60,7 +64,10 @@ import type {
   HppCategory,
   Product,
   SimulationRecord,
+  StaffDirectoryItem,
+  StaffHandlerSelection,
   StaffRole,
+  StaffRoleCategory,
   StorageSchema,
   StockAdjustment,
   StockOpname,
@@ -75,13 +82,17 @@ import type {
   TreatmentStaffFeeCost,
 } from "../lib/types";
 
-type ViewKey = "dashboard" | "fixed" | "treatments" | "consumables" | "hppPackages" | "masterCategories" | "products" | "simulation" | "logs" | "reports";
+type ViewKey = "dashboard" | "fixed" | "treatments" | "staffDirectory" | "commissionSimulation" | "commissionDrafts" | "commissionHistory" | "consumables" | "hppPackages" | "masterCategories" | "products" | "simulation" | "logs" | "reports";
 type PriceMode = "Normal" | "VIP" | "Promo" | "Manual";
 
 const navItems: { key: ViewKey; label: string; icon: ElementType }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "fixed", label: "Biaya Tetap", icon: Settings },
   { key: "treatments", label: "Treatment HPP", icon: Sparkles },
+  { key: "staffDirectory", label: "Data Staff", icon: ClipboardList },
+  { key: "commissionSimulation", label: "Simulasi Komisi", icon: Calculator },
+  { key: "commissionDrafts", label: "Draft Komisi", icon: ClipboardList },
+  { key: "commissionHistory", label: "Riwayat Komisi", icon: CheckCircle2 },
   { key: "consumables", label: "Master Bahan", icon: Package },
   { key: "hppPackages", label: "Master Paket HPP", icon: ClipboardList },
   { key: "masterCategories", label: "Master Kategori", icon: Settings },
@@ -92,6 +103,13 @@ const navItems: { key: ViewKey; label: string; icon: ElementType }[] = [
 ];
 
 const roles: StaffRole[] = ["dokter", "therapist", "beautician", "sales", "admin"];
+const heraRoles: HeraStaffRole[] = ["Dokter", "Beautician", "Nurse / Perawat", "Sales / Promoter", "Admin", "Therapist", "Other"];
+const heraCommissionModes: { value: HeraCommissionMode; label: string }[] = [
+  { value: "no_commission", label: "No commission" },
+  { value: "percent_final_price", label: "% dari harga final/promo" },
+  { value: "nominal_adjusted_by_discount", label: "Nominal ikut diskon promo" },
+  { value: "fixed_nominal", label: "Nominal tetap" },
+];
 const consumableCategories: ConsumableCategory[] = ["Disposable", "Skincare / Serum", "Cairan / Liquid", "Alat habis pakai", "Obat / Injectable support", "Other"];
 const consumableUnits: ConsumableUnit[] = ["pcs", "lembar", "ml", "gram", "tube", "bottle", "box", "pack", "vial", "ampoule", "syringe", "cartridge", "drop", "pump", "other"];
 const hppPackageCategories: HppPackageCategory[] = ["Facial", "Injection", "Laser / Energy Based Device", "Meso / Booster", "Body Treatment", "Other"];
@@ -171,6 +189,7 @@ function emptyTreatment(): Treatment {
     promoPrice: 0,
     targetMarginPercent: 40,
     commissionRules: [emptyRule()],
+    heraCommissionRules: defaultHeraCommissionRules(),
   };
 }
 
@@ -191,6 +210,10 @@ function emptyProduct(): Product {
     promoPrice: 0,
     commissionRule: { ...emptyRule(), role: "sales" },
     commissionRules: [{ ...emptyRule(), role: "sales" }],
+    heraCommissionRules: [
+      { id: generateId("hcomm"), role: "Sales / Promoter", mode: "percent_final_price", percent: 2, nominal: 0, active: true, notes: "" },
+      { id: generateId("hcomm"), role: "Beautician", mode: "no_commission", percent: 0, nominal: 0, active: true, notes: "" },
+    ],
     stockQuantity: 0,
   };
 }
@@ -233,6 +256,113 @@ function emptyHppPackage(): HppPackageTemplate {
     totalCost: 0,
     updatedAt: new Date().toISOString().slice(0, 10),
   };
+}
+
+function nextStaffCode(staff: StaffDirectoryItem[]) {
+  const max = staff.reduce((highest, item) => {
+    const number = Number(item.staffCode?.replace(/\D/g, "")) || 0;
+    return Math.max(highest, number);
+  }, 0);
+  return `STF-${String(max + 1).padStart(3, "0")}`;
+}
+
+function emptyStaff(staff: StaffDirectoryItem[] = []): StaffDirectoryItem {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    id: generateId("staff"),
+    staffCode: nextStaffCode(staff),
+    name: "",
+    role: "Beautician",
+    status: "active",
+    phone: "",
+    notes: "",
+    defaultCommissionEligible: true,
+    createdAt: today,
+    updatedAt: today,
+  };
+}
+
+function defaultHeraCommissionRules(): HeraCommissionRule[] {
+  return ["Dokter", "Beautician", "Nurse / Perawat", "Sales / Promoter"].map((role) => ({
+    id: generateId("hcomm"),
+    role: role as HeraStaffRole,
+    mode: "no_commission",
+    percent: 0,
+    nominal: 0,
+    notes: "",
+    active: true,
+  }));
+}
+
+function emptyHandlers(): StaffHandlerSelection {
+  return { beauticianSplit: "equal", beautician1Percent: 50, beautician2Percent: 50 };
+}
+
+function staffName(staff: StaffDirectoryItem[], id?: string, manual = "") {
+  return staff.find((item) => item.id === id)?.name || manual || "";
+}
+
+function calculateHeraCommission(rule: HeraCommissionRule, normalPrice: number, finalAllocatedAmount: number) {
+  if (!rule.active || rule.mode === "no_commission") return 0;
+  if (rule.mode === "percent_final_price") return finalAllocatedAmount * (rule.percent / 100);
+  if (rule.mode === "nominal_adjusted_by_discount") return normalPrice > 0 ? rule.nominal * (finalAllocatedAmount / normalPrice) : 0;
+  return rule.nominal;
+}
+
+function buildCommissionPreviewRows(args: {
+  rules: HeraCommissionRule[];
+  staff: StaffDirectoryItem[];
+  handlers: StaffHandlerSelection;
+  normalPrice: number;
+  finalAllocatedAmount: number;
+  itemName: string;
+  treatmentId?: string;
+  hppCost: number;
+  invoiceNumber: string;
+  patientName: string;
+  transactionDate: string;
+}) {
+  const { rules, staff, handlers, normalPrice, finalAllocatedAmount, itemName, treatmentId, hppCost, invoiceNumber, patientName, transactionDate } = args;
+  const now = new Date().toISOString();
+  const makeRow = (rule: HeraCommissionRule, staffId: string | undefined, staffNameSnapshot: string, amount: number, notes = ""): CommissionDraft => ({
+    id: generateId("draft"),
+    transactionDate,
+    invoiceNumber,
+    patientName,
+    itemName,
+    treatmentId,
+    staffId,
+    staffNameSnapshot: staffNameSnapshot || `${rule.role} belum dipilih`,
+    role: rule.role,
+    commissionMode: rule.mode,
+    baseAmount: finalAllocatedAmount,
+    normalPrice,
+    finalAllocatedAmount,
+    percent: rule.percent,
+    nominal: rule.nominal,
+    calculatedCommission: Math.round(amount),
+    hppCost,
+    estimatedProfit: Math.round(finalAllocatedAmount - hppCost - amount),
+    status: "draft",
+    notes: notes || rule.notes,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const rows: CommissionDraft[] = [];
+  for (const rule of rules.filter((item) => item.active)) {
+    const amount = calculateHeraCommission(rule, normalPrice, finalAllocatedAmount);
+    if (rule.role === "Dokter") rows.push(makeRow(rule, handlers.doctorId, staffName(staff, handlers.doctorId, handlers.manualDoctorName), amount));
+    if (rule.role === "Nurse / Perawat") rows.push(makeRow(rule, handlers.nurseId, staffName(staff, handlers.nurseId, handlers.manualNurseName), amount));
+    if (rule.role === "Sales / Promoter") rows.push(makeRow(rule, handlers.salesId, staffName(staff, handlers.salesId, handlers.manualSalesName), amount));
+    if (rule.role === "Beautician") {
+      const hasSecond = Boolean(handlers.beautician2Id || handlers.manualBeautician2Name);
+      const split1 = handlers.beauticianSplit === "beautician2" ? 0 : handlers.beauticianSplit === "custom" ? handlers.beautician1Percent / 100 : hasSecond && handlers.beauticianSplit === "equal" ? 0.5 : 1;
+      const split2 = handlers.beauticianSplit === "beautician1" ? 0 : handlers.beauticianSplit === "custom" ? handlers.beautician2Percent / 100 : hasSecond && handlers.beauticianSplit === "equal" ? 0.5 : 0;
+      if (split1 > 0) rows.push(makeRow(rule, handlers.beautician1Id, staffName(staff, handlers.beautician1Id, handlers.manualBeautician1Name), amount * split1, `Split beautician ${Math.round(split1 * 100)}%`));
+      if (split2 > 0) rows.push(makeRow(rule, handlers.beautician2Id, staffName(staff, handlers.beautician2Id, handlers.manualBeautician2Name), amount * split2, `Split beautician ${Math.round(split2 * 100)}%`));
+    }
+  }
+  return rows;
 }
 
 function packageTotal(items: HppPackageItem[]) {
@@ -295,6 +425,7 @@ function normalizeTreatmentForEdit(treatment: Treatment): Treatment {
     shotCartridgeCosts: treatment.shotCartridgeCosts ?? [],
     staffFeeCosts: treatment.staffFeeCosts ?? [],
     includeOverhead: treatment.includeOverhead ?? true,
+    heraCommissionRules: treatment.heraCommissionRules?.length ? treatment.heraCommissionRules : defaultHeraCommissionRules(),
     staffInvolved: treatment.staffInvolved ?? [],
     commissionRules: (treatment.commissionRules ?? []).map((rule) => ({
       ...rule,
@@ -391,6 +522,7 @@ export default function Home() {
   const [editingProduct, setEditingProduct] = useState<Product>(emptyProduct());
   const [editingConsumable, setEditingConsumable] = useState<ConsumableItem>(emptyConsumable());
   const [editingHppPackage, setEditingHppPackage] = useState<HppPackageTemplate>(emptyHppPackage());
+  const [editingStaff, setEditingStaff] = useState<StaffDirectoryItem>(emptyStaff());
   const [selectedSimulationId, setSelectedSimulationId] = useState("");
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   const [simulationItemId, setSimulationItemId] = useState("");
@@ -478,6 +610,7 @@ export default function Home() {
     setEditingProduct(emptyProduct());
     setEditingConsumable(emptyConsumable());
     setEditingHppPackage(emptyHppPackage());
+    setEditingStaff(emptyStaff());
     try {
       const response = await fetch("/api/admin/clear-data", { method: "POST" });
       if (response.ok) {
@@ -498,6 +631,7 @@ export default function Home() {
     if (!window.confirm("Isi ulang contoh data Hera Clinic?")) return;
     const seeded = resetData();
     setData(seeded);
+    setEditingStaff(emptyStaff(seeded.staffDirectory));
     try {
       const response = await fetch("/api/admin/seed-data", { method: "POST" });
       if (response.ok) {
@@ -667,6 +801,7 @@ export default function Home() {
               />
             )}
             {view === "fixed" && <FixedCostPage data={data} persist={persist} addCategory={addCategory} />}
+            {view === "staffDirectory" && <StaffDirectoryPage data={data} persist={persist} editingStaff={editingStaff} setEditingStaff={setEditingStaff} />}
             {view === "treatments" && (
               <TreatmentPage
                 data={data}
@@ -680,6 +815,9 @@ export default function Home() {
                 addCategory={addCategory}
               />
             )}
+            {view === "commissionSimulation" && <CommissionSimulationPage data={data} persist={persist} />}
+            {view === "commissionDrafts" && <CommissionDraftPage data={data} persist={persist} />}
+            {view === "commissionHistory" && <CommissionHistoryPage data={data} />}
             {view === "consumables" && (
               <ConsumablesPage
                 data={data}
@@ -793,6 +931,122 @@ function MobileBottomNav({ view, setView }: { view: ViewKey; setView: (view: Vie
         })}
       </div>
     </nav>
+  );
+}
+
+function StaffDirectoryPage({ data, persist, editingStaff, setEditingStaff }: { data: StorageSchema; persist: (next: StorageSchema) => void; editingStaff: StaffDirectoryItem; setEditingStaff: (staff: StaffDirectoryItem) => void }) {
+  const [newRoleName, setNewRoleName] = useState("");
+  const staffUsed = (staffId: string) => [...(data.commissionDrafts ?? []), ...(data.commissionHistory ?? [])].some((row) => row.staffId === staffId);
+  const saveStaff = () => {
+    if (!editingStaff.name.trim()) return;
+    const now = new Date().toISOString().slice(0, 10);
+    const synced = { ...editingStaff, staffCode: editingStaff.staffCode || nextStaffCode(data.staffDirectory), updatedAt: now };
+    const exists = data.staffDirectory.some((staff) => staff.id === synced.id);
+    persist({ ...data, staffDirectory: exists ? data.staffDirectory.map((staff) => staff.id === synced.id ? synced : staff) : [synced, ...data.staffDirectory] });
+    setEditingStaff(emptyStaff(data.staffDirectory));
+  };
+  const duplicateStaff = (staff: StaffDirectoryItem) => {
+    const copy = { ...staff, id: generateId("staff"), staffCode: nextStaffCode(data.staffDirectory), name: `${staff.name} Salinan`, createdAt: new Date().toISOString().slice(0, 10), updatedAt: new Date().toISOString().slice(0, 10) };
+    persist({ ...data, staffDirectory: [copy, ...data.staffDirectory] });
+  };
+  const deleteStaff = (staff: StaffDirectoryItem) => {
+    if (staffUsed(staff.id)) {
+      persist({ ...data, staffDirectory: data.staffDirectory.map((item) => item.id === staff.id ? { ...item, status: "inactive", updatedAt: new Date().toISOString().slice(0, 10) } : item) });
+      window.alert("Staff sudah dipakai di riwayat komisi, jadi dinonaktifkan agar data lama tetap aman.");
+      return;
+    }
+    if (window.confirm("Hapus staff ini?")) persist({ ...data, staffDirectory: data.staffDirectory.filter((item) => item.id !== staff.id) });
+  };
+  const upsertRole = (role: StaffRoleCategory) => {
+    persist({ ...data, staffRoles: data.staffRoles.map((item) => item.id === role.id ? { ...role, updatedAt: new Date().toISOString().slice(0, 10) } : item) });
+  };
+  const addRole = () => {
+    if (!newRoleName.trim()) return;
+    const date = new Date().toISOString().slice(0, 10);
+    persist({ ...data, staffRoles: [{ id: generateId("role"), name: newRoleName.trim(), active: true, createdAt: date, updatedAt: date }, ...data.staffRoles] });
+    setNewRoleName("");
+  };
+
+  return (
+    <div className="grid min-w-0 gap-6">
+      <Card>
+        <h3 className="text-lg font-semibold text-[#0d4b3a]">Data Staff</h3>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <Field label="Kode staff" value={editingStaff.staffCode} onChange={(value) => setEditingStaff({ ...editingStaff, staffCode: value })} />
+          <Field label="Nama staff" value={editingStaff.name} onChange={(value) => setEditingStaff({ ...editingStaff, name: value })} />
+          <SelectField label="Role" value={editingStaff.role} onChange={(value) => setEditingStaff({ ...editingStaff, role: value as HeraStaffRole })}>
+            {(data.staffRoles?.filter((role) => role.active).map((role) => role.name) ?? heraRoles).map((role) => <option key={role}>{role}</option>)}
+          </SelectField>
+          <SelectField label="Status" value={editingStaff.status} onChange={(value) => setEditingStaff({ ...editingStaff, status: value as StaffDirectoryItem["status"] })}>
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+          </SelectField>
+          <Field label="Telepon optional" value={editingStaff.phone ?? ""} onChange={(value) => setEditingStaff({ ...editingStaff, phone: value })} />
+          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-[#ded2bf] bg-white px-3 text-sm">
+            <input type="checkbox" checked={editingStaff.defaultCommissionEligible} onChange={(event) => setEditingStaff({ ...editingStaff, defaultCommissionEligible: event.target.checked })} />
+            Commission Eligible
+          </label>
+          <div className="md:col-span-3"><Field label="Notes" value={editingStaff.notes ?? ""} onChange={(value) => setEditingStaff({ ...editingStaff, notes: value })} /></div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <ActionButton onClick={saveStaff}><Save className="h-4 w-4" /> Simpan staff</ActionButton>
+          <ActionButton variant="ghost" onClick={() => setEditingStaff(emptyStaff(data.staffDirectory))}><Plus className="h-4 w-4" /> Add staff</ActionButton>
+        </div>
+      </Card>
+      <Card>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-[#0d4b3a]">Role Staff</h3>
+            <p className="mt-1 text-sm text-[#756b5d]">Role nonaktif tidak muncul sebagai pilihan baru, tetapi data lama tetap aman.</p>
+          </div>
+          <div className="flex min-w-[280px] flex-wrap gap-2">
+            <input className={inputClass("flex-1")} value={newRoleName} onChange={(event) => setNewRoleName(event.target.value)} placeholder="Role baru" />
+            <ActionButton variant="ghost" onClick={addRole}><Plus className="h-4 w-4" /> Tambah role</ActionButton>
+          </div>
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]"><tr>{["Role", "Status", "Action"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr></thead>
+            <tbody>{data.staffRoles.map((role) => (
+              <tr key={role.id} className="border-b border-[#efe4d2]">
+                <td className="p-3"><input className={inputClass()} value={role.name} onChange={(event) => upsertRole({ ...role, name: event.target.value })} /></td>
+                <td className="p-3">{role.active ? "Aktif" : "Nonaktif"}</td>
+                <td className="p-3"><ActionButton variant={role.active ? "danger" : "secondary"} onClick={() => upsertRole({ ...role, active: !role.active })}>{role.active ? "Deactivate" : "Reactivate"}</ActionButton></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </Card>
+      <Card>
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+          <table className="w-full min-w-[920px] text-sm">
+            <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+              <tr>{["Code", "Name", "Role", "Status", "Commission Eligible", "Notes", "Action"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {data.staffDirectory.length === 0 ? <tr><td className="p-4 text-[#756b5d]" colSpan={7}>Belum ada staff.</td></tr> : data.staffDirectory.map((staff) => (
+                <tr key={staff.id} className="border-b border-[#efe4d2]">
+                  <td className="p-3 font-semibold text-[#0d4b3a]">{staff.staffCode}</td>
+                  <td className="p-3">{staff.name}</td>
+                  <td className="p-3">{staff.role}</td>
+                  <td className="p-3">{staff.status}</td>
+                  <td className="p-3">{staff.defaultCommissionEligible ? "Ya" : "Tidak"}</td>
+                  <td className="p-3">{staff.notes || "-"}</td>
+                  <td className="p-3">
+                    <div className="flex flex-wrap gap-2">
+                      <ActionButton variant="ghost" onClick={() => setEditingStaff(staff)}>Edit</ActionButton>
+                      <ActionButton variant="secondary" onClick={() => duplicateStaff(staff)}><Copy className="h-4 w-4" /></ActionButton>
+                      <ActionButton variant={staff.status === "active" ? "danger" : "secondary"} onClick={() => persist({ ...data, staffDirectory: data.staffDirectory.map((item) => item.id === staff.id ? { ...item, status: staff.status === "active" ? "inactive" : "active" } : item) })}>{staff.status === "active" ? "Deactivate" : "Reactivate"}</ActionButton>
+                      <ActionButton variant="danger" onClick={() => deleteStaff(staff)}>Delete</ActionButton>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
   );
 }
 
@@ -1269,6 +1523,7 @@ function TreatmentPage(props: {
   const { data, persist, setEditingTreatment, openSimulation, addCategory } = props;
   const editingTreatment = normalizeTreatmentForEdit(props.editingTreatment);
   const [priceMode, setPriceMode] = useState<PriceMode>("Normal");
+  const [handlers, setHandlers] = useState<StaffHandlerSelection>(emptyHandlers());
   const defaultPrice = priceMode === "VIP" ? editingTreatment.vipPrice : priceMode === "Promo" ? editingTreatment.promoPrice : editingTreatment.nonVipPrice;
   const baseResult = treatmentResult(editingTreatment, data.fixedCosts, priceMode === "Manual" ? "Normal" : priceMode, defaultPrice);
   const sliderMax = Math.max(baseResult.recommendedPrice * 3, editingTreatment.nonVipPrice * 2, baseResult.totalCost + 100000);
@@ -1276,6 +1531,20 @@ function TreatmentPage(props: {
   const [savedMessage, setSavedMessage] = useState("");
   const sellingPrice = priceMode === "Manual" ? manualPrice || Math.ceil(baseResult.recommendedPrice / 10000) * 10000 : defaultPrice;
   const liveResult = treatmentResult(editingTreatment, data.fixedCosts, priceMode === "Manual" ? "Normal" : priceMode, sellingPrice);
+  const heraCommissionRows = buildCommissionPreviewRows({
+    rules: editingTreatment.heraCommissionRules ?? defaultHeraCommissionRules(),
+    staff: data.staffDirectory ?? [],
+    handlers,
+    normalPrice: editingTreatment.nonVipPrice,
+    finalAllocatedAmount: sellingPrice,
+    itemName: editingTreatment.name || "Treatment belum dinamai",
+    treatmentId: editingTreatment.id,
+    hppCost: liveResult.totalCost,
+    invoiceNumber: "PREVIEW",
+    patientName: "",
+    transactionDate: new Date().toISOString().slice(0, 10),
+  });
+  const heraCommissionTotal = heraCommissionRows.reduce((sum, row) => sum + row.calculatedCommission, 0);
 
   useEffect(() => {
     if (manualPrice === 0 && baseResult.recommendedPrice > 0) setManualPrice(Math.ceil(baseResult.recommendedPrice / 10000) * 10000);
@@ -1316,6 +1585,8 @@ function TreatmentPage(props: {
             <TreatmentShotCartridgeSection treatment={editingTreatment} updateTreatment={updateTreatment} />
             <TreatmentStaffFeeSection treatment={editingTreatment} updateTreatment={updateTreatment} basePrice={editingTreatment.nonVipPrice} />
             <TreatmentOverheadSection treatment={editingTreatment} updateTreatment={updateTreatment} settings={data.fixedCosts} />
+            <HeraCommissionRulesEditor rules={editingTreatment.heraCommissionRules ?? defaultHeraCommissionRules()} onChange={(rules) => updateTreatment({ ...editingTreatment, heraCommissionRules: rules })} />
+            <StaffHandlerSection staff={data.staffDirectory ?? []} handlers={handlers} setHandlers={setHandlers} />
 
             <div>
               <p className="mb-2 text-sm font-semibold text-[#0d4b3a]">Staff yang terlibat</p>
@@ -1367,6 +1638,7 @@ function TreatmentPage(props: {
               <StatCard label="Listrik device treatment" value={rupiah(treatmentDeviceElectricityTotal(editingTreatment.deviceElectricityCosts) + liveResult.electricityPerTreatment)} tone="gold" />
               <StatCard label="Shot / cartridge" value={rupiah(treatmentShotCartridgeTotal(editingTreatment.shotCartridgeCosts))} tone="gold" />
               <StatCard label="Staff fee masuk HPP" value={rupiah(treatmentStaffFeeTotal(editingTreatment.staffFeeCosts))} tone="gold" />
+              <StatCard label="Total komisi Hera" value={rupiah(heraCommissionTotal)} tone="gold" />
               <StatCard label="Direct HPP" value={rupiah(liveResult.directHpp)} />
               <StatCard label="Biaya listrik per tindakan" value={rupiah(liveResult.electricityPerTreatment)} tone="gold" />
               <StatCard label="Overhead per treatment" value={rupiah(liveResult.overheadAllocated)} tone="gold" />
@@ -1400,10 +1672,12 @@ function TreatmentPage(props: {
             <div className="grid gap-3 sm:grid-cols-2">
               <StatCard label="Harga jual" value={rupiah(liveResult.sellingPrice)} />
               <StatCard label="HPP" value={rupiah(liveResult.totalCost)} />
+              <StatCard label="HPP + komisi" value={rupiah(liveResult.totalCost + heraCommissionTotal)} tone="gold" />
               <StatCard label="Komisi" value={rupiah(liveResult.totalCommission)} tone="gold" />
-              <StatCard label="Profit bersih" value={rupiah(liveResult.netProfit)} tone={liveResult.netProfit < 0 ? "rose" : "emerald"} />
-              <StatCard label="Margin" value={percent(liveResult.marginPercent)} tone={liveResult.marginPercent < editingTreatment.targetMarginPercent ? "rose" : "emerald"} />
+              <StatCard label="Profit setelah komisi Hera" value={rupiah(liveResult.sellingPrice - liveResult.totalCost - heraCommissionTotal)} tone={liveResult.sellingPrice - liveResult.totalCost - heraCommissionTotal < 0 ? "rose" : "emerald"} />
+              <StatCard label="Margin setelah komisi" value={percent(liveResult.sellingPrice > 0 ? ((liveResult.sellingPrice - liveResult.totalCost - heraCommissionTotal) / liveResult.sellingPrice) * 100 : 0)} tone={liveResult.marginPercent < editingTreatment.targetMarginPercent ? "rose" : "emerald"} />
             </div>
+            <CommissionDraftPreview rows={heraCommissionRows} />
 
             {liveResult.marginPercent < editingTreatment.targetMarginPercent && (
               <div className="rounded-lg border border-[#e1aaa0] bg-[#fff2ef] p-4 text-sm font-medium text-[#a33a2d]">
@@ -1864,6 +2138,91 @@ function TreatmentOverheadSection({ treatment, updateTreatment, settings }: { tr
         <MiniMetric label="Overhead treatment" value={rupiah(overheadPerTreatment)} />
         <MiniMetric label="Fixed cost / customer" value={rupiah(breakdown.perCustomer)} />
       </div>
+    </div>
+  );
+}
+
+function HeraCommissionRulesEditor({ rules, onChange }: { rules: HeraCommissionRule[]; onChange: (rules: HeraCommissionRule[]) => void }) {
+  const normalized = rules.length ? rules : defaultHeraCommissionRules();
+  const updateRule = (id: string, patch: Partial<HeraCommissionRule>) => onChange(normalized.map((rule) => rule.id === id ? { ...rule, ...patch } : rule));
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-[#0d4b3a]">Aturan Komisi</p>
+        <ActionButton variant="ghost" onClick={() => onChange([...normalized, { id: generateId("hcomm"), role: "Other", mode: "no_commission", percent: 0, nominal: 0, active: true, notes: "" }])}><Plus className="h-4 w-4" /> Tambah aturan</ActionButton>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+        <table className="w-full min-w-[880px] text-sm">
+          <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+            <tr>{["Role", "Mode", "Percent %", "Nominal Rp", "Notes", "Active", "Aksi"].map((head) => <th key={head} className="p-2">{head}</th>)}</tr>
+          </thead>
+          <tbody>
+            {normalized.map((rule) => (
+              <tr key={rule.id} className="border-t border-[#efe4d2]">
+                <td className="p-2"><select className={inputClass()} value={rule.role} onChange={(event) => updateRule(rule.id, { role: event.target.value as HeraStaffRole })}>{heraRoles.map((role) => <option key={role}>{role}</option>)}</select></td>
+                <td className="p-2"><select className={inputClass()} value={rule.mode} onChange={(event) => updateRule(rule.id, { mode: event.target.value as HeraCommissionMode })}>{heraCommissionModes.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}</select></td>
+                <td className="p-2"><input className={inputClass()} type="number" value={rule.percent} onChange={(event) => updateRule(rule.id, { percent: Number(event.target.value) })} placeholder="%" /></td>
+                <td className="p-2"><input className={inputClass()} type="number" value={rule.nominal} onChange={(event) => updateRule(rule.id, { nominal: Number(event.target.value) })} placeholder="Nominal" /></td>
+                <td className="p-2"><input className={inputClass()} value={rule.notes ?? ""} onChange={(event) => updateRule(rule.id, { notes: event.target.value })} placeholder="Catatan" /></td>
+                <td className="p-2 text-center"><input type="checkbox" checked={rule.active} onChange={(event) => updateRule(rule.id, { active: event.target.checked })} /></td>
+                <td className="p-2"><ActionButton variant="danger" onClick={() => onChange(normalized.filter((item) => item.id !== rule.id))}>Hapus</ActionButton></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function StaffHandlerSection({ staff, handlers, setHandlers }: { staff: StaffDirectoryItem[]; handlers: StaffHandlerSelection; setHandlers: (handlers: StaffHandlerSelection) => void }) {
+  const active = staff.filter((item) => item.status === "active");
+  const byRole = (rolesList: HeraStaffRole[]) => active.filter((item) => rolesList.includes(item.role));
+  const StaffSelect = ({ label, value, rolesList, onChange }: { label: string; value?: string; rolesList: HeraStaffRole[]; onChange: (value: string) => void }) => (
+    <SelectField label={label} value={value ?? ""} onChange={onChange}>
+      <option value="">Manual / staff tidak dipilih</option>
+      {byRole(rolesList).map((item) => <option key={item.id} value={item.id}>{item.staffCode} - {item.name}</option>)}
+    </SelectField>
+  );
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-white p-3">
+      <p className="text-sm font-semibold text-[#0d4b3a]">Staff yang Handle</p>
+      <div className="grid gap-3 md:grid-cols-3">
+        <StaffSelect label="Doctor" value={handlers.doctorId} rolesList={["Dokter"]} onChange={(value) => setHandlers({ ...handlers, doctorId: value })} />
+        <StaffSelect label="Beautician 1" value={handlers.beautician1Id} rolesList={["Beautician", "Therapist"]} onChange={(value) => setHandlers({ ...handlers, beautician1Id: value })} />
+        <StaffSelect label="Beautician 2 optional" value={handlers.beautician2Id} rolesList={["Beautician", "Therapist"]} onChange={(value) => setHandlers({ ...handlers, beautician2Id: value })} />
+        <SelectField label="Beautician split" value={handlers.beauticianSplit} onChange={(value) => setHandlers({ ...handlers, beauticianSplit: value as StaffHandlerSelection["beauticianSplit"] })}>
+          <option value="equal">Equal</option><option value="beautician1">Beautician 1 only</option><option value="beautician2">Beautician 2 only</option><option value="custom">Custom %</option>
+        </SelectField>
+        <Field label="Beautician 1 %" type="number" value={handlers.beautician1Percent} onChange={(value) => setHandlers({ ...handlers, beautician1Percent: Number(value) })} />
+        <Field label="Beautician 2 %" type="number" value={handlers.beautician2Percent} onChange={(value) => setHandlers({ ...handlers, beautician2Percent: Number(value) })} />
+        <StaffSelect label="Nurse / Perawat" value={handlers.nurseId} rolesList={["Nurse / Perawat"]} onChange={(value) => setHandlers({ ...handlers, nurseId: value })} />
+        <StaffSelect label="Sales / Promoter" value={handlers.salesId} rolesList={["Sales / Promoter"]} onChange={(value) => setHandlers({ ...handlers, salesId: value })} />
+      </div>
+    </div>
+  );
+}
+
+function CommissionDraftPreview({ rows }: { rows: CommissionDraft[] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+      <table className="w-full min-w-[760px] text-sm">
+        <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+          <tr>{["Role", "Staff", "Mode", "Base", "Komisi", "Estimasi profit"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? <tr><td className="p-4 text-[#756b5d]" colSpan={6}>Belum ada komisi Hera aktif.</td></tr> : rows.map((row) => (
+            <tr key={row.id} className="border-t border-[#efe4d2]">
+              <td className="p-3">{row.role}</td>
+              <td className="p-3">{row.staffNameSnapshot}</td>
+              <td className="p-3">{heraCommissionModes.find((mode) => mode.value === row.commissionMode)?.label ?? row.commissionMode}</td>
+              <td className="p-3">{rupiah(row.finalAllocatedAmount)}</td>
+              <td className="p-3 font-semibold text-[#0d4b3a]">{rupiah(row.calculatedCommission)}</td>
+              <td className="p-3">{rupiah(row.estimatedProfit)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -2736,6 +3095,7 @@ function ProductPage({ data, persist, editingProduct, setEditingProduct, addCate
             <Field label="Stok optional" type="number" value={productDraft.stockQuantity ?? 0} onChange={(value) => setEditingProduct({ ...productDraft, stockQuantity: Number(value) })} />
           </div>
           <CommissionEditor rules={productDraft.commissionRules ?? []} onChange={(rules) => setEditingProduct({ ...productDraft, commissionRules: rules, commissionRule: rules[0] ?? productDraft.commissionRule })} />
+          <HeraCommissionRulesEditor rules={productDraft.heraCommissionRules?.length ? productDraft.heraCommissionRules : [{ id: generateId("hcomm"), role: "Sales / Promoter", mode: "percent_final_price", percent: 2, nominal: 0, active: true, notes: "" }]} onChange={(rules) => setEditingProduct({ ...productDraft, heraCommissionRules: rules })} />
           <div className="flex flex-wrap gap-2">
             <ActionButton onClick={saveProduct}><Save className="h-4 w-4" /> Simpan produk</ActionButton>
             <ActionButton variant="ghost" onClick={() => setEditingProduct(emptyProduct())}><Plus className="h-4 w-4" /> Baru</ActionButton>
@@ -2830,6 +3190,140 @@ function ProductTable({ data, persist, setEditingProduct }: { data: StorageSchem
         </table>
       </div>
     </Card>
+  );
+}
+
+function CommissionSimulationPage({ data, persist }: { data: StorageSchema; persist: (next: StorageSchema) => void }) {
+  const [transactionDate, setTransactionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [invoiceNumber, setInvoiceNumber] = useState(`INV-${Date.now().toString().slice(-6)}`);
+  const [patientName, setPatientName] = useState("");
+  const [treatmentId, setTreatmentId] = useState(data.treatments[0]?.id ?? "");
+  const [finalAllocatedAmount, setFinalAllocatedAmount] = useState(0);
+  const [handlers, setHandlers] = useState<StaffHandlerSelection>(emptyHandlers());
+  const treatment = data.treatments.map(normalizeTreatmentForEdit).find((item) => item.id === treatmentId) ?? data.treatments.map(normalizeTreatmentForEdit)[0];
+  const normalPrice = treatment?.nonVipPrice ?? 0;
+  const result = treatment ? treatmentResult(treatment, data.fixedCosts, "Normal", finalAllocatedAmount || normalPrice) : undefined;
+  const allocated = finalAllocatedAmount || normalPrice;
+  const previewRows = treatment && result ? buildCommissionPreviewRows({
+    rules: treatment.heraCommissionRules ?? defaultHeraCommissionRules(),
+    staff: data.staffDirectory ?? [],
+    handlers,
+    normalPrice,
+    finalAllocatedAmount: allocated,
+    itemName: treatment.name,
+    treatmentId: treatment.id,
+    hppCost: result.totalCost,
+    invoiceNumber,
+    patientName,
+    transactionDate,
+  }) : [];
+  const totalCommission = previewRows.reduce((sum, row) => sum + row.calculatedCommission, 0);
+  const stockWarnings = treatment?.consumableUsages?.map((usage) => {
+    const material = data.consumables.find((item) => item.id === usage.consumableId);
+    return material ? `${usage.name}: pakai ${usage.quantityUsed} ${usage.unit}, stok ${material.currentStock ?? material.availableQuantity}` : "";
+  }).filter(Boolean) ?? [];
+  const saveDraft = () => {
+    if (!previewRows.length) return;
+    persist({ ...data, commissionDrafts: [...previewRows, ...(data.commissionDrafts ?? [])] });
+  };
+  return (
+    <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)]">
+      <Card>
+        <h3 className="text-lg font-semibold text-[#0d4b3a]">Manual Transaction Entry</h3>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Field label="Transaction Date" type="date" value={transactionDate} onChange={setTransactionDate} />
+          <Field label="Invoice Number" value={invoiceNumber} onChange={setInvoiceNumber} />
+          <Field label="Patient Name optional" value={patientName} onChange={setPatientName} />
+          <SelectField label="Treatment Master" value={treatment?.id ?? ""} onChange={setTreatmentId}>
+            {data.treatments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </SelectField>
+          <Field label="Normal Price" type="number" value={normalPrice} onChange={() => undefined} />
+          <Field label="Final Allocated Amount" type="number" value={allocated} onChange={(value) => setFinalAllocatedAmount(Number(value))} />
+        </div>
+        <div className="mt-4"><StaffHandlerSection staff={data.staffDirectory ?? []} handlers={handlers} setHandlers={setHandlers} /></div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <ActionButton onClick={() => undefined}>Hitung Preview Komisi</ActionButton>
+          <ActionButton variant="secondary" onClick={saveDraft}>Simpan Draft</ActionButton>
+        </div>
+      </Card>
+      <div className="grid min-w-0 gap-6">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <StatCard label="Total normal value" value={rupiah(normalPrice)} />
+          <StatCard label="Total patient paid" value={rupiah(allocated)} />
+          <StatCard label="HPP from treatment master" value={rupiah(result?.totalCost ?? 0)} />
+          <StatCard label="Total commission" value={rupiah(totalCommission)} tone="gold" />
+          <StatCard label="Estimated gross profit" value={rupiah(allocated - (result?.directHpp ?? 0))} />
+          <StatCard label="Estimated net profit" value={rupiah(allocated - (result?.totalCost ?? 0) - totalCommission)} tone={allocated - (result?.totalCost ?? 0) - totalCommission < 0 ? "rose" : "emerald"} />
+        </div>
+        {stockWarnings.length > 0 && <Card><h3 className="text-sm font-semibold text-[#0d4b3a]">Estimasi pemakaian stock</h3><div className="mt-2 grid gap-1 text-sm text-[#756b5d]">{stockWarnings.map((item, index) => <p key={`${item}-${index}`}>{item}</p>)}</div></Card>}
+        <Card><h3 className="mb-3 text-lg font-semibold text-[#0d4b3a]">Preview Komisi</h3><CommissionDraftPreview rows={previewRows} /></Card>
+      </div>
+    </div>
+  );
+}
+
+function CommissionDraftPage({ data, persist }: { data: StorageSchema; persist: (next: StorageSchema) => void }) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const approveSelected = () => {
+    const approved = data.commissionDrafts.filter((row) => selected.includes(row.id)).map((row) => ({ ...row, status: "approved" as const, updatedAt: new Date().toISOString() }));
+    persist({ ...data, commissionDrafts: data.commissionDrafts.filter((row) => !selected.includes(row.id)), commissionHistory: [...approved, ...(data.commissionHistory ?? [])] });
+    setSelected([]);
+  };
+  const rejectSelected = () => {
+    persist({ ...data, commissionDrafts: data.commissionDrafts.map((row) => selected.includes(row.id) ? { ...row, status: "rejected", updatedAt: new Date().toISOString() } : row) });
+    setSelected([]);
+  };
+  return (
+    <Card>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-lg font-semibold text-[#0d4b3a]">Draft Komisi</h3>
+        <div className="flex flex-wrap gap-2"><ActionButton variant="secondary" onClick={() => commissionDraftReport(data.commissionDrafts, "Commission Draft Report")}>PDF Draft</ActionButton><ActionButton onClick={approveSelected}>Approve selected</ActionButton><ActionButton variant="danger" onClick={rejectSelected}>Reject selected</ActionButton></div>
+      </div>
+      <CommissionRowsTable rows={data.commissionDrafts ?? []} selected={selected} setSelected={setSelected} persistDelete={(ids) => persist({ ...data, commissionDrafts: data.commissionDrafts.filter((row) => !ids.includes(row.id)) })} />
+    </Card>
+  );
+}
+
+function CommissionHistoryPage({ data }: { data: StorageSchema }) {
+  return (
+    <Card>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-lg font-semibold text-[#0d4b3a]">Riwayat Komisi</h3>
+        <div className="flex flex-wrap gap-2"><ActionButton variant="secondary" onClick={() => commissionDraftReport(data.commissionHistory, "Commission Approved Report")}>PDF Approved</ActionButton><ActionButton variant="ghost" onClick={() => staffCommissionStatement(data.commissionHistory)}>PDF Staff Statement</ActionButton></div>
+      </div>
+      <CommissionRowsTable rows={data.commissionHistory ?? []} />
+    </Card>
+  );
+}
+
+function CommissionRowsTable({ rows, selected, setSelected, persistDelete }: { rows: CommissionDraft[]; selected?: string[]; setSelected?: (ids: string[]) => void; persistDelete?: (ids: string[]) => void }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+      <table className="w-full min-w-[1180px] text-sm">
+        <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
+          <tr>{["", "Tanggal", "Invoice", "Pasien", "Item", "Staff", "Role", "Mode", "Base", "Komisi", "Profit", "Status", "Aksi"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? <tr><td className="p-4 text-[#756b5d]" colSpan={13}>Belum ada data.</td></tr> : rows.map((row) => (
+            <tr key={row.id} className="border-b border-[#efe4d2]">
+              <td className="p-3">{selected && setSelected ? <input type="checkbox" checked={selected.includes(row.id)} onChange={(event) => setSelected(event.target.checked ? [...selected, row.id] : selected.filter((id) => id !== row.id))} /> : null}</td>
+              <td className="p-3">{row.transactionDate}</td>
+              <td className="p-3">{row.invoiceNumber}</td>
+              <td className="p-3">{row.patientName || "-"}</td>
+              <td className="p-3">{row.itemName}</td>
+              <td className="p-3">{row.staffNameSnapshot}</td>
+              <td className="p-3">{row.role}</td>
+              <td className="p-3">{heraCommissionModes.find((mode) => mode.value === row.commissionMode)?.label ?? row.commissionMode}</td>
+              <td className="p-3">{rupiah(row.finalAllocatedAmount)}</td>
+              <td className="p-3 font-semibold text-[#0d4b3a]">{rupiah(row.calculatedCommission)}</td>
+              <td className="p-3">{rupiah(row.estimatedProfit)}</td>
+              <td className="p-3">{row.status}</td>
+              <td className="p-3">{persistDelete ? <ActionButton variant="danger" onClick={() => persistDelete([row.id])}>Delete</ActionButton> : "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -3153,6 +3647,9 @@ function ReportsPage({ data, selectedSimulationId }: { data: StorageSchema; sele
     { title: "Product Profit Report", body: "Profit produk retail berdasarkan tier modal, harga normal, VIP, promo, dan komisi.", action: () => productProfitReport(data.products) },
     { title: "Master Bahan & Stok", body: "Daftar bahan internal, biaya per unit terkecil, stok tersedia, nilai stok, dan low stock.", action: () => consumableStockReport(data.consumables) },
     { title: "Master Paket HPP", body: "Template paket bahan treatment, item list, qty, unit, dan total HPP paket.", action: () => hppPackageReport(data.hppPackages) },
+    { title: "Commission Draft Report", body: "Draft komisi berdasarkan invoice, staff, role, HPP, dan estimasi profit.", action: () => commissionDraftReport(data.commissionDrafts, "Commission Draft Report") },
+    { title: "Commission Approved Report", body: "Riwayat komisi approved untuk review sebelum payroll.", action: () => commissionDraftReport(data.commissionHistory, "Commission Approved Report") },
+    { title: "Staff Commission Statement", body: "Statement komisi staff dari riwayat approved.", action: () => staffCommissionStatement(data.commissionHistory) },
   ];
   return (
     <div className="grid min-w-0 gap-4 md:grid-cols-2">

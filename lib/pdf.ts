@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { acElectricityCost, deviceElectricityCost, fixedCostBreakdown, fixedCostTotals, productResult, rupiah, staffCostTotal, treatmentResult } from "./calculations";
-import type { CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, StockOpname, StockOpnameItem, Treatment } from "./types";
+import type { CommissionDraft, CommissionLog, ConsumableItem, FixedCostSettings, HppPackageTemplate, Product, SimulationRecord, StockOpname, StockOpnameItem, Treatment } from "./types";
 
 function title(doc: jsPDF, reportTitle: string, notes?: string) {
   doc.setFillColor(13, 75, 58);
@@ -242,6 +242,35 @@ export function exportStockOpnameResultPdf(opname: StockOpname, materials: Consu
   doc.text("Supervisor/Admin: ____________________", 160, Math.min(finalY + 18, 195));
   addPdfFooter(doc);
   doc.save(`hasil-stock-opname-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+export function commissionDraftReport(rows: CommissionDraft[], titleText = "Commission Draft Report") {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  addPdfHeader(doc, titleText, "landscape");
+  const totalCommission = rows.reduce((sum, row) => sum + row.calculatedCommission, 0);
+  const totalRevenue = rows.reduce((sum, row) => sum + row.finalAllocatedAmount, 0);
+  const totalHpp = rows.reduce((sum, row) => sum + row.hppCost, 0);
+  const totalProfit = rows.reduce((sum, row) => sum + row.estimatedProfit, 0);
+  autoTable(doc, {
+    startY: 42,
+    body: [[`Total revenue: ${rupiah(totalRevenue)}`, `Total HPP: ${rupiah(totalHpp)}`, `Total commission: ${rupiah(totalCommission)}`, `Total estimated profit: ${rupiah(totalProfit)}`]],
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 2 },
+  });
+  autoTable(doc, {
+    startY: 58,
+    head: [["Tanggal", "Invoice", "Pasien", "Item", "Staff", "Role", "Mode", "Base", "Komisi", "Profit", "Status"]],
+    body: rows.map((row) => [row.transactionDate, row.invoiceNumber, row.patientName ?? "-", row.itemName, row.staffNameSnapshot, row.role, row.commissionMode, rupiah(row.finalAllocatedAmount), rupiah(row.calculatedCommission), rupiah(row.estimatedProfit), row.status]),
+    theme: "grid",
+    styles: { fontSize: 7, cellPadding: 1.8, overflow: "linebreak", valign: "middle" },
+    headStyles: { fillColor: [241, 234, 220], textColor: [13, 75, 58] },
+  });
+  addPdfFooter(doc);
+  doc.save(`${titleText.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+export function staffCommissionStatement(rows: CommissionDraft[], staffName = "Semua Staff") {
+  commissionDraftReport(rows, `Staff Commission Statement - ${staffName}`);
 }
 
 export function treatmentHppReport(treatments: Treatment[], settings: FixedCostSettings) {

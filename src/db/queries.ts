@@ -1,9 +1,9 @@
 import { eq, inArray } from "drizzle-orm";
 import { emptyData, initialData } from "../../lib/storage";
 import { normalizeFixedCostSettings } from "../../lib/storage";
-import type { CommissionLog, ConsumableItem, FixedCostSettings, HppCategory, HppPackageTemplate, Product, SimulationRecord, StockAdjustment, StockOpname, StorageSchema, Treatment } from "../../lib/types";
+import type { CommissionDraft, CommissionLog, ConsumableItem, FixedCostSettings, HppCategory, HppPackageTemplate, Product, SimulationRecord, StaffDirectoryItem, StaffRoleCategory, StockAdjustment, StockOpname, StorageSchema, Treatment } from "../../lib/types";
 import { getDb } from "./index";
-import { commissionLogs, consumableItems, fixedCostSettings, hppCategories, hppPackageTemplates, products, simulationRecords, stockAdjustments, stockOpnames, treatments } from "./schema";
+import { commissionDrafts, commissionHistory, commissionLogs, consumableItems, fixedCostSettings, hppCategories, hppPackageTemplates, products, simulationRecords, staffDirectory, staffRoles, stockAdjustments, stockOpnames, treatments } from "./schema";
 
 const SETTINGS_ID = "hera-clinic-default";
 
@@ -89,6 +89,7 @@ function treatmentToDb(treatment: Treatment) {
     staffFeeCosts: treatment.staffFeeCosts ?? [],
     includeOverhead: treatment.includeOverhead ?? true,
     commissionRules: treatment.commissionRules ?? [],
+    heraCommissionRules: treatment.heraCommissionRules ?? [],
     updatedAt: new Date(),
   };
 }
@@ -117,6 +118,7 @@ function treatmentFromDb(row: typeof treatments.$inferSelect): Treatment {
     promoPrice: row.promoPrice,
     targetMarginPercent: row.targetMarginPercent,
     commissionRules: (row.commissionRules as Treatment["commissionRules"]) ?? [],
+    heraCommissionRules: ((row as unknown as { heraCommissionRules?: Treatment["heraCommissionRules"] }).heraCommissionRules) ?? [],
   };
 }
 
@@ -214,6 +216,102 @@ function stockOpnameFromDb(row: typeof stockOpnames.$inferSelect): StockOpname {
   };
 }
 
+function staffToDb(item: StaffDirectoryItem) {
+  return {
+    id: item.id,
+    staffCode: item.staffCode,
+    name: item.name,
+    role: item.role,
+    status: item.status,
+    phone: item.phone ?? null,
+    notes: item.notes ?? null,
+    defaultCommissionEligible: item.defaultCommissionEligible,
+    createdAt: new Date(item.createdAt),
+    updatedAt: new Date(),
+  };
+}
+
+function staffFromDb(row: typeof staffDirectory.$inferSelect): StaffDirectoryItem {
+  return {
+    id: row.id,
+    staffCode: row.staffCode,
+    name: row.name,
+    role: row.role as StaffDirectoryItem["role"],
+    status: row.status as StaffDirectoryItem["status"],
+    phone: row.phone ?? undefined,
+    notes: row.notes ?? undefined,
+    defaultCommissionEligible: row.defaultCommissionEligible,
+    createdAt: row.createdAt.toISOString().slice(0, 10),
+    updatedAt: row.updatedAt.toISOString().slice(0, 10),
+  };
+}
+
+function staffRoleToDb(item: StaffRoleCategory) {
+  return { id: item.id, name: item.name, active: item.active, createdAt: new Date(item.createdAt), updatedAt: new Date() };
+}
+
+function staffRoleFromDb(row: typeof staffRoles.$inferSelect): StaffRoleCategory {
+  return { id: row.id, name: row.name, active: row.active, createdAt: row.createdAt.toISOString().slice(0, 10), updatedAt: row.updatedAt.toISOString().slice(0, 10) };
+}
+
+function commissionDraftToDb(item: CommissionDraft) {
+  return {
+    id: item.id,
+    transactionDate: item.transactionDate,
+    invoiceNumber: item.invoiceNumber,
+    patientName: item.patientName ?? null,
+    itemName: item.itemName,
+    treatmentId: item.treatmentId ?? null,
+    staffId: item.staffId ?? null,
+    staffNameSnapshot: item.staffNameSnapshot,
+    role: item.role,
+    commissionMode: item.commissionMode,
+    baseAmount: Math.round(item.baseAmount),
+    normalPrice: Math.round(item.normalPrice),
+    finalAllocatedAmount: Math.round(item.finalAllocatedAmount),
+    percent: Math.round(item.percent * 100),
+    nominal: Math.round(item.nominal),
+    calculatedCommission: Math.round(item.calculatedCommission),
+    hppCost: Math.round(item.hppCost),
+    estimatedProfit: Math.round(item.estimatedProfit),
+    status: item.status,
+    notes: item.notes ?? null,
+    createdAt: new Date(item.createdAt),
+    updatedAt: new Date(),
+  };
+}
+
+function commissionDraftFromDb(row: typeof commissionDrafts.$inferSelect): CommissionDraft {
+  return {
+    id: row.id,
+    transactionDate: row.transactionDate,
+    invoiceNumber: row.invoiceNumber,
+    patientName: row.patientName ?? undefined,
+    itemName: row.itemName,
+    treatmentId: row.treatmentId ?? undefined,
+    staffId: row.staffId ?? undefined,
+    staffNameSnapshot: row.staffNameSnapshot,
+    role: row.role as CommissionDraft["role"],
+    commissionMode: row.commissionMode as CommissionDraft["commissionMode"],
+    baseAmount: row.baseAmount,
+    normalPrice: row.normalPrice,
+    finalAllocatedAmount: row.finalAllocatedAmount,
+    percent: row.percent / 100,
+    nominal: row.nominal,
+    calculatedCommission: row.calculatedCommission,
+    hppCost: row.hppCost,
+    estimatedProfit: row.estimatedProfit,
+    status: row.status as CommissionDraft["status"],
+    notes: row.notes ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function commissionHistoryFromDb(row: typeof commissionHistory.$inferSelect): CommissionDraft {
+  return commissionDraftFromDb(row as unknown as typeof commissionDrafts.$inferSelect);
+}
+
 function hppPackageToDb(item: HppPackageTemplate) {
   const totalCost = item.items.reduce((sum, row) => sum + row.totalCost, 0);
   return {
@@ -274,6 +372,7 @@ function productToDb(product: Product) {
     promoPrice: product.promoPrice,
     stockQuantity: product.stockQuantity ?? null,
     commissionRules: product.commissionRules ?? [{ ...product.commissionRule, appliesTo: "All" }],
+    heraCommissionRules: product.heraCommissionRules ?? [],
     updatedAt: new Date(),
   };
 }
@@ -301,6 +400,7 @@ function productFromDb(row: typeof products.$inferSelect): Product {
       notes: "",
     },
     commissionRules: rules ?? [],
+    heraCommissionRules: (row.heraCommissionRules as Product["heraCommissionRules"]) ?? [],
   };
 }
 
@@ -393,7 +493,7 @@ function logFromDb(row: typeof commissionLogs.$inferSelect): CommissionLog {
 
 export async function getAppData(): Promise<StorageSchema> {
   const db = getDb();
-  const [settingsRows, treatmentRows, productRows, simulationRows, logRows, consumableRows, hppPackageRows, categoryRows, adjustmentRows, opnameRows] = await Promise.all([
+  const [settingsRows, treatmentRows, productRows, simulationRows, logRows, consumableRows, hppPackageRows, categoryRows, adjustmentRows, opnameRows, staffRows, staffRoleRows, draftRows, historyRows] = await Promise.all([
     db.select().from(fixedCostSettings),
     db.select().from(treatments),
     db.select().from(products),
@@ -404,6 +504,10 @@ export async function getAppData(): Promise<StorageSchema> {
     db.select().from(hppCategories),
     db.select().from(stockAdjustments),
     db.select().from(stockOpnames),
+    db.select().from(staffDirectory),
+    db.select().from(staffRoles),
+    db.select().from(commissionDrafts),
+    db.select().from(commissionHistory),
   ]);
 
   return {
@@ -415,6 +519,10 @@ export async function getAppData(): Promise<StorageSchema> {
     consumables: consumableRows.map(consumableFromDb),
     stockAdjustments: adjustmentRows.map(stockAdjustmentFromDb),
     stockOpnames: opnameRows.map(stockOpnameFromDb),
+    staffDirectory: staffRows.map(staffFromDb),
+    staffRoles: staffRoleRows.map(staffRoleFromDb),
+    commissionDrafts: draftRows.map(commissionDraftFromDb),
+    commissionHistory: historyRows.map(commissionHistoryFromDb),
     hppPackages: hppPackageRows.map(hppPackageFromDb),
     categories: categoryRows.map(categoryFromDb),
   };
@@ -429,6 +537,10 @@ export async function replaceAppData(data: StorageSchema) {
   await db.delete(commissionLogs);
   await db.delete(stockAdjustments);
   await db.delete(stockOpnames);
+  await db.delete(commissionDrafts);
+  await db.delete(commissionHistory);
+  await db.delete(staffDirectory);
+  await db.delete(staffRoles);
   await db.delete(consumableItems);
   await db.delete(hppPackageTemplates);
   await db.delete(hppCategories);
@@ -441,6 +553,10 @@ export async function replaceAppData(data: StorageSchema) {
   if (data.consumables.length) await db.insert(consumableItems).values(data.consumables.map(consumableToDb));
   if (data.stockAdjustments.length) await db.insert(stockAdjustments).values(data.stockAdjustments.map(stockAdjustmentToDb));
   if (data.stockOpnames.length) await db.insert(stockOpnames).values(data.stockOpnames.map(stockOpnameToDb));
+  if (data.staffDirectory.length) await db.insert(staffDirectory).values(data.staffDirectory.map(staffToDb));
+  if (data.staffRoles.length) await db.insert(staffRoles).values(data.staffRoles.map(staffRoleToDb));
+  if (data.commissionDrafts.length) await db.insert(commissionDrafts).values(data.commissionDrafts.map(commissionDraftToDb));
+  if (data.commissionHistory.length) await db.insert(commissionHistory).values(data.commissionHistory.map(commissionDraftToDb));
   if (data.hppPackages.length) await db.insert(hppPackageTemplates).values(data.hppPackages.map(hppPackageToDb));
   if (data.categories.length) await db.insert(hppCategories).values(data.categories.map(categoryToDb));
 }

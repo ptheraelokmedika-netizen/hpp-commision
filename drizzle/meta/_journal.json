@@ -50,6 +50,13 @@
       "when": 1780820025217,
       "tag": "0006_long_crusher_hogan",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780896883310,
+      "tag": "0007_living_killer_shrike",
+      "breakpoints": true
     }
   ]
 }

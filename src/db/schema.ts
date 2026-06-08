@@ -49,6 +49,7 @@ export const treatments = pgTable("treatments", {
   staffFeeCosts: jsonb("staff_fee_costs").notNull().default([]),
   includeOverhead: boolean("include_overhead").notNull().default(true),
   commissionRules: jsonb("commission_rules").notNull().default([]),
+  heraCommissionRules: jsonb("hera_commission_rules").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -64,6 +65,7 @@ export const products = pgTable("products", {
   promoPrice: integer("promo_price").notNull().default(0),
   stockQuantity: integer("stock_quantity"),
   commissionRules: jsonb("commission_rules").notNull().default([]),
+  heraCommissionRules: jsonb("hera_commission_rules").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -158,6 +160,86 @@ export const stockOpnames = pgTable("hpp_stock_opnames", {
   notes: text("notes"),
   status: text("status").notNull().default("draft"),
   items: jsonb("items").notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const staffDirectory = pgTable("hpp_staff_directory", {
+  id: text("id").primaryKey(),
+  staffCode: text("staff_code").notNull(),
+  name: text("name").notNull(),
+  role: text("role").notNull(),
+  status: text("status").notNull().default("active"),
+  phone: text("phone"),
+  notes: text("notes"),
+  defaultCommissionEligible: boolean("default_commission_eligible").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const staffRoles = pgTable("hpp_staff_roles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const commissionDrafts = pgTable("hpp_commission_drafts", {
+  id: text("id").primaryKey(),
+  transactionDate: text("transaction_date").notNull(),
+  invoiceNumber: text("invoice_number").notNull(),
+  patientName: text("patient_name"),
+  itemName: text("item_name").notNull(),
+  treatmentId: text("treatment_id"),
+  staffId: text("staff_id"),
+  staffNameSnapshot: text("staff_name_snapshot").notNull(),
+  role: text("role").notNull(),
+  commissionMode: text("commission_mode").notNull(),
+  baseAmount: integer("base_amount").notNull().default(0),
+  normalPrice: integer("normal_price").notNull().default(0),
+  finalAllocatedAmount: integer("final_allocated_amount").notNull().default(0),
+  percent: integer("percent").notNull().default(0),
+  nominal: integer("nominal").notNull().default(0),
+  calculatedCommission: integer("calculated_commission").notNull().default(0),
+  hppCost: integer("hpp_cost").notNull().default(0),
+  estimatedProfit: integer("estimated_profit").notNull().default(0),
+  status: text("status").notNull().default("draft"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const commissionHistory = pgTable("hpp_commission_history", {
+  id: text("id").primaryKey(),
+  transactionDate: text("transaction_date").notNull(),
+  invoiceNumber: text("invoice_number").notNull(),
+  patientName: text("patient_name"),
+  itemName: text("item_name").notNull(),
+  treatmentId: text("treatment_id"),
+  staffId: text("staff_id"),
+  staffNameSnapshot: text("staff_name_snapshot").notNull(),
+  role: text("role").notNull(),
+  commissionMode: text("commission_mode").notNull(),
+  baseAmount: integer("base_amount").notNull().default(0),
+  normalPrice: integer("normal_price").notNull().default(0),
+  finalAllocatedAmount: integer("final_allocated_amount").notNull().default(0),
+  percent: integer("percent").notNull().default(0),
+  nominal: integer("nominal").notNull().default(0),
+  calculatedCommission: integer("calculated_commission").notNull().default(0),
+  hppCost: integer("hpp_cost").notNull().default(0),
+  estimatedProfit: integer("estimated_profit").notNull().default(0),
+  status: text("status").notNull().default("approved"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const commissionRules = pgTable("hpp_commission_rules", {
+  id: text("id").primaryKey(),
+  itemType: text("item_type").notNull(),
+  itemId: text("item_id").notNull(),
+  rules: jsonb("rules").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
