@@ -458,7 +458,7 @@ function StatCard({ label, value, tone = "emerald" }: { label: string; value: st
   return (
     <div className={`min-w-0 rounded-lg border p-4 shadow-sm ${toneClass}`}>
       <p className="text-xs font-medium uppercase tracking-wide text-[#7a7265]">{label}</p>
-      <p className="mt-2 break-words text-xl font-semibold text-[#0d4b3a]">{value}</p>
+      <p className="mt-1.5 break-words text-lg font-semibold text-[#0d4b3a]">{value}</p>
     </div>
   );
 }
@@ -506,6 +506,28 @@ function ActionButton({
       onClick={onClick}
       className={`inline-flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${variants[variant]}`}
     >
+      {children}
+    </button>
+  );
+}
+
+function CompactAction({
+  children,
+  onClick,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  tone?: "neutral" | "danger" | "gold";
+}) {
+  const toneClass =
+    tone === "danger"
+      ? "border-[#e1aaa0] bg-[#fff8f6] text-[#a33a2d] hover:bg-[#fff2ef]"
+      : tone === "gold"
+        ? "border-[#d8b65f]/70 bg-[#fffaf0] text-[#6e5420] hover:bg-[#fff5dc]"
+        : "border-[#ded2bf] bg-white text-[#0d4b3a] hover:bg-[#fbf6ed]";
+  return (
+    <button type="button" onClick={onClick} className={`inline-flex min-h-8 items-center justify-center rounded-md border px-2.5 text-xs font-semibold transition ${toneClass}`}>
       {children}
     </button>
   );
@@ -1565,12 +1587,15 @@ function TreatmentPage(props: {
   };
 
   return (
-    <div className="grid min-w-0 max-w-full grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.85fr)]">
-      <div className="grid min-w-0 gap-6">
-        <Card>
-          <h3 className="text-lg font-semibold text-[#0d4b3a]">Master Data Treatment</h3>
-          <div className="mt-4 grid min-w-0 gap-4">
-            <div className="grid min-w-0 gap-4 md:grid-cols-3">
+    <div className="grid min-w-0 max-w-full grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(390px,0.78fr)]">
+      <div className="grid min-w-0 gap-5">
+        <Card className="p-4">
+          <div>
+            <h3 className="text-base font-semibold text-[#0d4b3a]">Master Data Treatment</h3>
+            <p className="mt-1 text-xs text-[#756b5d]">Atur biaya, bahan, harga, dan komisi treatment dalam satu alur.</p>
+          </div>
+          <div className="mt-4 grid min-w-0 gap-3.5">
+            <div className="grid min-w-0 gap-3 md:grid-cols-3">
               <Field label="Nama treatment" value={editingTreatment.name} onChange={(value) => updateTreatment({ ...editingTreatment, name: value })} />
               <CategorySelect label="Kategori treatment" group="product" fallbackName={editingTreatment.category} categories={data.categories} addCategory={addCategory} onChange={(_id, name) => updateTreatment({ ...editingTreatment, category: name })} />
               <Field label="Durasi treatment (menit)" type="number" value={editingTreatment.durationMinutes} onChange={(value) => updateTreatment({ ...editingTreatment, durationMinutes: Number(value) })} />
@@ -1609,7 +1634,7 @@ function TreatmentPage(props: {
               </div>
             </div>
 
-            <div className="grid min-w-0 gap-4 md:grid-cols-4">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Field label="Harga Normal / Non-VIP" type="number" value={editingTreatment.nonVipPrice} onChange={(value) => updateTreatment({ ...editingTreatment, nonVipPrice: Number(value) })} />
               <Field label="Harga VIP" type="number" value={editingTreatment.vipPrice} onChange={(value) => updateTreatment({ ...editingTreatment, vipPrice: Number(value) })} />
               <Field label="Harga Promo" type="number" value={editingTreatment.promoPrice} onChange={(value) => updateTreatment({ ...editingTreatment, promoPrice: Number(value) })} />
@@ -1630,10 +1655,10 @@ function TreatmentPage(props: {
       </div>
 
       <div className="min-w-0">
-        <Card className="xl:sticky xl:top-6">
-          <h3 className="text-lg font-semibold text-[#0d4b3a]">Simulasi Harga & Profit</h3>
-          <div className="mt-4 grid min-w-0 gap-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+        <Card className="p-4 xl:sticky xl:top-6">
+          <h3 className="text-base font-semibold text-[#0d4b3a]">Simulasi Harga & Profit</h3>
+          <div className="mt-3 grid min-w-0 gap-3">
+            <div className="grid gap-2 sm:grid-cols-2">
               <StatCard label="Consumable + material + alat" value={rupiah(liveResult.directHpp - treatmentDeviceElectricityTotal(editingTreatment.deviceElectricityCosts) - treatmentShotCartridgeTotal(editingTreatment.shotCartridgeCosts) - treatmentStaffFeeTotal(editingTreatment.staffFeeCosts) - liveResult.electricityPerTreatment)} />
               <StatCard label="Listrik device treatment" value={rupiah(treatmentDeviceElectricityTotal(editingTreatment.deviceElectricityCosts) + liveResult.electricityPerTreatment)} tone="gold" />
               <StatCard label="Shot / cartridge" value={rupiah(treatmentShotCartridgeTotal(editingTreatment.shotCartridgeCosts))} tone="gold" />
@@ -1648,7 +1673,7 @@ function TreatmentPage(props: {
               <StatCard label="Harga Normal / VIP / Promo" value={`${rupiah(editingTreatment.nonVipPrice)} / ${rupiah(editingTreatment.vipPrice)} / ${rupiah(editingTreatment.promoPrice)}`} />
             </div>
 
-            <div className="rounded-lg border border-[#eadfce] bg-[#fffaf2] p-4">
+            <div className="rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
               <div className="grid gap-3 md:grid-cols-2">
                 <SelectField label="Tier harga" value={priceMode} onChange={(value) => setPriceMode(value as PriceMode)}>
                   {["Normal", "VIP", "Promo", "Manual"].map((mode) => <option key={mode}>{mode}</option>)}
@@ -1669,7 +1694,7 @@ function TreatmentPage(props: {
               />
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               <StatCard label="Harga jual" value={rupiah(liveResult.sellingPrice)} />
               <StatCard label="HPP" value={rupiah(liveResult.totalCost)} />
               <StatCard label="HPP + komisi" value={rupiah(liveResult.totalCost + heraCommissionTotal)} tone="gold" />
@@ -1697,25 +1722,38 @@ function DynamicDisposableSection({ treatment, updateTreatment, categories, addC
   const items = treatment.disposableItems ?? treatment.disposableCosts ?? [];
   const updateItem = (id: string, patch: Partial<TreatmentCostItem>) => updateTreatment({ ...treatment, disposableItems: items.map((item) => (item.id === id ? { ...item, ...patch } : item)) });
   return (
-    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-[#0d4b3a]">Disposable Cost per Customer</p>
-        <ActionButton variant="ghost" onClick={() => updateTreatment({ ...treatment, disposableItems: [...items, { id: generateId("cost"), name: "", amount: 0 }] })}>
+        <div>
+          <p className="text-sm font-semibold text-[#0d4b3a]">Disposable Cost per Customer</p>
+          <p className="mt-0.5 text-xs text-[#756b5d]">Kelola item habis pakai per pasien dalam daftar ringkas.</p>
+        </div>
+        <ActionButton variant="secondary" onClick={() => updateTreatment({ ...treatment, disposableItems: [...items, { id: generateId("cost"), name: "", amount: 0 }] })}>
           <Plus className="h-4 w-4" /> Tambah item disposable
         </ActionButton>
       </div>
-      {items.map((item) => (
-        <div key={item.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_150px]">
-          <CategorySelect label="Kategori" group="treatment-cost" value={item.categoryId} fallbackName="Consumables" categories={categories} addCategory={addCategory} onChange={(categoryId) => updateItem(item.id, { categoryId })} />
-          <input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} placeholder="Nama item" className={inputClass()} />
-          <input type="number" value={item.amount} onChange={(event) => updateItem(item.id, { amount: Number(event.target.value) })} placeholder="Biaya" className={inputClass()} />
-          <div className="flex flex-wrap items-center gap-1">
-            <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
-            <button type="button" onClick={() => updateTreatment({ ...treatment, disposableItems: [...items, { ...item, id: generateId("cost"), name: `${item.name || "Item"} Salinan` }] })} className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Copy</button>
-            <button type="button" onClick={() => window.confirm("Hapus item ini?") && updateTreatment({ ...treatment, disposableItems: items.filter((row) => row.id !== item.id) })} className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]">Hapus</button>
+      {items.length === 0 ? <EmptyState text="Belum ada disposable item. Tambahkan needle, kapas, spuit, anestesi, atau item lain." /> : (
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce] bg-white">
+          <div className="hidden min-w-[760px] grid-cols-[minmax(180px,0.9fr)_minmax(220px,1.2fr)_140px_150px] gap-2 border-b border-[#eadfce] bg-[#f7efdf] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[#0d4b3a] md:grid">
+            <span>Kategori</span><span>Nama item</span><span>Biaya</span><span>Aksi</span>
+          </div>
+          <div className="grid gap-0">
+            {items.map((item) => (
+              <div key={item.id} className="grid min-w-[760px] grid-cols-1 gap-2 border-b border-[#f0e6d6] p-3 last:border-b-0 md:grid-cols-[minmax(180px,0.9fr)_minmax(220px,1.2fr)_140px_150px] md:items-center md:py-2.5">
+                <div className="md:hidden text-xs font-semibold text-[#756b5d]">Kategori</div>
+                <CategorySelect label="" group="treatment-cost" value={item.categoryId} fallbackName="Consumables" categories={categories} addCategory={addCategory} onChange={(categoryId) => updateItem(item.id, { categoryId })} />
+                <input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} placeholder="Nama item" className={inputClass("md:min-h-10")} />
+                <input type="number" value={item.amount} onChange={(event) => updateItem(item.id, { amount: Number(event.target.value) })} placeholder="Biaya" className={inputClass("md:min-h-10")} />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <CompactAction>Edit</CompactAction>
+                  <CompactAction onClick={() => updateTreatment({ ...treatment, disposableItems: [...items, { ...item, id: generateId("cost"), name: `${item.name || "Item"} Salinan` }] })}>Copy</CompactAction>
+                  <CompactAction tone="danger" onClick={() => window.confirm("Hapus item ini?") && updateTreatment({ ...treatment, disposableItems: items.filter((row) => row.id !== item.id) })}>Hapus</CompactAction>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -2185,9 +2223,12 @@ function StaffHandlerSection({ staff, handlers, setHandlers }: { staff: StaffDir
     </SelectField>
   );
   return (
-    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-white p-3">
-      <p className="text-sm font-semibold text-[#0d4b3a]">Staff yang Handle</p>
-      <div className="grid gap-3 md:grid-cols-3">
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-white p-3.5">
+      <div>
+        <p className="text-sm font-semibold text-[#0d4b3a]">Staff yang Handle</p>
+        <p className="mt-0.5 text-xs text-[#756b5d]">Pilih staff aktif untuk preview komisi. Bisa dikosongkan untuk estimasi role.</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <StaffSelect label="Doctor" value={handlers.doctorId} rolesList={["Dokter"]} onChange={(value) => setHandlers({ ...handlers, doctorId: value })} />
         <StaffSelect label="Beautician 1" value={handlers.beautician1Id} rolesList={["Beautician", "Therapist"]} onChange={(value) => setHandlers({ ...handlers, beautician1Id: value })} />
         <StaffSelect label="Beautician 2 optional" value={handlers.beautician2Id} rolesList={["Beautician", "Therapist"]} onChange={(value) => setHandlers({ ...handlers, beautician2Id: value })} />
@@ -2205,24 +2246,30 @@ function StaffHandlerSection({ staff, handlers, setHandlers }: { staff: StaffDir
 
 function CommissionDraftPreview({ rows }: { rows: CommissionDraft[] }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-[#eadfce]">
+    <div className="rounded-lg border border-[#eadfce] bg-white">
+      <div className="border-b border-[#eadfce] px-3 py-2">
+        <p className="text-sm font-semibold text-[#0d4b3a]">Preview Komisi</p>
+        <p className="mt-0.5 text-xs text-[#756b5d]">Estimasi komisi per role/staff berdasarkan harga final.</p>
+      </div>
+      <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-sm">
         <thead className="bg-[#f7efdf] text-left text-[#0d4b3a]">
-          <tr>{["Role", "Staff", "Mode", "Base", "Komisi", "Estimasi profit"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr>
+          <tr>{["Role", "Staff", "Mode", "Base", "Komisi", "Estimasi profit"].map((head) => <th key={head} className="px-3 py-2 text-xs font-semibold uppercase tracking-wide">{head}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.length === 0 ? <tr><td className="p-4 text-[#756b5d]" colSpan={6}>Belum ada komisi Hera aktif.</td></tr> : rows.map((row) => (
+          {rows.length === 0 ? <tr><td className="px-4 py-6 text-center text-sm text-[#756b5d]" colSpan={6}>Belum ada preview komisi. Isi transaksi dan klik Hitung Preview Komisi.</td></tr> : rows.map((row) => (
             <tr key={row.id} className="border-t border-[#efe4d2]">
-              <td className="p-3">{row.role}</td>
-              <td className="p-3">{row.staffNameSnapshot}</td>
-              <td className="p-3">{heraCommissionModes.find((mode) => mode.value === row.commissionMode)?.label ?? row.commissionMode}</td>
-              <td className="p-3">{rupiah(row.finalAllocatedAmount)}</td>
-              <td className="p-3 font-semibold text-[#0d4b3a]">{rupiah(row.calculatedCommission)}</td>
-              <td className="p-3">{rupiah(row.estimatedProfit)}</td>
+              <td className="px-3 py-2.5 font-medium text-[#0d4b3a]">{row.role}</td>
+              <td className="px-3 py-2.5">{row.staffNameSnapshot}</td>
+              <td className="px-3 py-2.5 text-[#756b5d]">{heraCommissionModes.find((mode) => mode.value === row.commissionMode)?.label ?? row.commissionMode}</td>
+              <td className="px-3 py-2.5 text-right">{rupiah(row.finalAllocatedAmount)}</td>
+              <td className="px-3 py-2.5 text-right font-semibold text-[#0d4b3a]">{rupiah(row.calculatedCommission)}</td>
+              <td className="px-3 py-2.5 text-right">{rupiah(row.estimatedProfit)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -2230,38 +2277,76 @@ function CommissionDraftPreview({ rows }: { rows: CommissionDraft[] }) {
 function CommissionEditor({ rules, onChange }: { rules: CommissionRule[]; onChange: (rules: CommissionRule[]) => void }) {
   const updateRule = (id: string, patch: Partial<CommissionRule>) => onChange(rules.map((rule) => (rule.id === id ? { ...rule, ...patch } : rule)));
   return (
-    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-[#0d4b3a]">Aturan Komisi Treatment</p>
-        <ActionButton variant="ghost" onClick={() => onChange([...rules, emptyRule()])}>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#0d4b3a]">Aturan Komisi Treatment</p>
+          <p className="text-xs text-[#756b5d]">Satu treatment bisa punya beberapa penerima komisi dengan role dan nilai berbeda.</p>
+        </div>
+        <ActionButton variant="secondary" onClick={() => onChange([...rules, emptyRule()])}>
           <Plus className="h-4 w-4" /> Tambah penerima komisi
         </ActionButton>
       </div>
-      {rules.map((rule) => (
-        <div key={rule.id} className="grid min-w-0 gap-2 rounded-lg border border-[#eadfce] bg-white p-3">
-          <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-3">
-            <SelectField label="Role" value={rule.role} onChange={(value) => updateRule(rule.id, { role: value as StaffRole })}>
-              {[...roles, "other" as StaffRole].map((role) => <option key={role}>{role}</option>)}
-            </SelectField>
-            <Field label="Nama staff optional" value={rule.staffName ?? ""} onChange={(value) => updateRule(rule.id, { staffName: value })} />
-            <Field label="Jumlah orang" type="number" value={rule.quantity} onChange={(value) => updateRule(rule.id, { quantity: Math.max(Number(value), 1) })} />
+      {rules.length === 0 ? (
+        <EmptyState text="Belum ada penerima komisi. Tambahkan role dokter, therapist, beautician, sales, atau admin sesuai kebutuhan." />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-[#eadfce] bg-white">
+          <div className="hidden min-w-[1120px] grid-cols-[130px_minmax(150px,1fr)_84px_minmax(190px,1.1fr)_120px_130px_minmax(160px,1fr)_144px] gap-2 border-b border-[#eadfce] bg-[#f7efdf] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[#0d4b3a] md:grid">
+            <span>Role</span>
+            <span>Staff</span>
+            <span>Qty</span>
+            <span>Tipe</span>
+            <span>Nilai</span>
+            <span>Berlaku</span>
+            <span>Catatan</span>
+            <span>Aksi</span>
           </div>
-          <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-4">
-            <SelectField label="Tipe komisi" value={rule.type} onChange={(value) => updateRule(rule.id, { type: value as CommissionType })}>
-              {commissionTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-            </SelectField>
-            <Field label="Nilai komisi" type="number" value={rule.value} onChange={(value) => updateRule(rule.id, { value: Number(value) })} />
-            <SelectField label="Berlaku untuk" value={rule.appliesTo} onChange={(value) => updateRule(rule.id, { appliesTo: value as CommissionAppliesTo })}>
-              {appliesToOptions.map((type) => <option key={type}>{type}</option>)}
-            </SelectField>
-            <Field label="Catatan" value={rule.notes ?? ""} onChange={(value) => updateRule(rule.id, { notes: value })} />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <ActionButton variant="ghost" onClick={() => onChange([...rules, { ...rule, id: generateId("comm") }])}><Copy className="h-4 w-4" /> Duplikasi</ActionButton>
-            <ActionButton variant="danger" onClick={() => onChange(rules.filter((item) => item.id !== rule.id))}><Trash2 className="h-4 w-4" /> Hapus</ActionButton>
+          <div className="grid min-w-[1120px] gap-0 divide-y divide-[#efe4d2] md:min-w-[1120px]">
+            {rules.map((rule) => (
+              <div key={rule.id} className="grid grid-cols-1 gap-2 px-3 py-3 md:grid-cols-[130px_minmax(150px,1fr)_84px_minmax(190px,1.1fr)_120px_130px_minmax(160px,1fr)_144px] md:items-center">
+                <label className="grid gap-1 text-xs font-semibold text-[#756b5d] md:contents">
+                  <span className="md:hidden">Role</span>
+                  <select className={inputClass("md:min-h-10")} value={rule.role} onChange={(event) => updateRule(rule.id, { role: event.target.value as StaffRole })}>
+                    {[...roles, "other" as StaffRole].map((role) => <option key={role}>{role}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-[#756b5d] md:contents">
+                  <span className="md:hidden">Nama staff optional</span>
+                  <input className={inputClass("md:min-h-10")} value={rule.staffName ?? ""} onChange={(event) => updateRule(rule.id, { staffName: event.target.value })} placeholder="Nama staff" />
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-[#756b5d] md:contents">
+                  <span className="md:hidden">Jumlah orang</span>
+                  <input className={inputClass("md:min-h-10")} type="number" value={rule.quantity} onChange={(event) => updateRule(rule.id, { quantity: Math.max(Number(event.target.value), 1) })} />
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-[#756b5d] md:contents">
+                  <span className="md:hidden">Tipe komisi</span>
+                  <select className={inputClass("md:min-h-10")} value={rule.type} onChange={(event) => updateRule(rule.id, { type: event.target.value as CommissionType })}>
+                    {commissionTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-[#756b5d] md:contents">
+                  <span className="md:hidden">Nilai komisi</span>
+                  <input className={inputClass("md:min-h-10")} type="number" value={rule.value} onChange={(event) => updateRule(rule.id, { value: Number(event.target.value) })} />
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-[#756b5d] md:contents">
+                  <span className="md:hidden">Berlaku untuk</span>
+                  <select className={inputClass("md:min-h-10")} value={rule.appliesTo} onChange={(event) => updateRule(rule.id, { appliesTo: event.target.value as CommissionAppliesTo })}>
+                    {appliesToOptions.map((type) => <option key={type}>{type}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-[#756b5d] md:contents">
+                  <span className="md:hidden">Catatan</span>
+                  <input className={inputClass("md:min-h-10")} value={rule.notes ?? ""} onChange={(event) => updateRule(rule.id, { notes: event.target.value })} placeholder="Catatan" />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <CompactAction tone="gold" onClick={() => onChange([...rules, { ...rule, id: generateId("comm") }])}><Copy className="h-3.5 w-3.5" /> Duplikasi</CompactAction>
+                  <CompactAction tone="danger" onClick={() => onChange(rules.filter((item) => item.id !== rule.id))}><Trash2 className="h-3.5 w-3.5" /> Hapus</CompactAction>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -3059,36 +3144,47 @@ function ProductPage({ data, persist, editingProduct, setEditingProduct, addCate
   };
 
   return (
-    <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.85fr)]">
-      <Card>
-        <h3 className="text-lg font-semibold text-[#0d4b3a]">Produk / Retail</h3>
-        <div className="mt-4 grid min-w-0 gap-4">
-          <div className="grid min-w-0 gap-4 md:grid-cols-3">
+    <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(390px,0.78fr)]">
+      <Card className="p-4">
+        <div className="mb-3">
+          <h3 className="text-base font-semibold text-[#0d4b3a]">Produk / Retail</h3>
+          <p className="mt-1 text-xs text-[#756b5d]">Input modal, harga jual, dan komisi produk retail.</p>
+        </div>
+        <div className="grid min-w-0 gap-3">
+          <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
             <Field label="Nama produk" value={productDraft.name} onChange={(value) => setEditingProduct({ ...productDraft, name: value })} />
             <CategorySelect label="Kategori" group="product" value={productDraft.categoryId} fallbackName={productDraft.category} categories={data.categories} addCategory={addCategory} onChange={(categoryId, name) => setEditingProduct({ ...productDraft, categoryId, category: name || productDraft.category })} />
             <Field label="Supplier" value={productDraft.supplier} onChange={(value) => setEditingProduct({ ...productDraft, supplier: value })} />
           </div>
-          <div className="grid min-w-0 gap-3 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
+          <div className="grid min-w-0 gap-2 rounded-lg border border-[#eadfce] bg-[#fffaf2] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-[#0d4b3a]">Buying tier</p>
+              <div>
+                <p className="text-sm font-semibold text-[#0d4b3a]">Buying tier</p>
+                <p className="mt-0.5 text-xs text-[#756b5d]">Satu baris untuk setiap tier pembelian.</p>
+              </div>
               <ActionButton variant="ghost" onClick={() => setEditingProduct({ ...productDraft, buyingTiers: [...productDraft.buyingTiers, { id: generateId("tier"), quantity: 20, unitCost: 0 }] })}>
                 <Plus className="h-4 w-4" /> Custom tier
               </ActionButton>
             </div>
-            {productDraft.buyingTiers.map((tier) => (
-              <div key={tier.id} className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[120px_minmax(0,1fr)_80px_150px]">
-                <input type="number" value={tier.quantity} onChange={(event) => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.map((item) => item.id === tier.id ? { ...item, quantity: Number(event.target.value) } : item) })} className={inputClass()} placeholder="Jumlah beli" />
-                <input type="number" value={tier.unitCost} onChange={(event) => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.map((item) => item.id === tier.id ? { ...item, unitCost: Number(event.target.value) } : item) })} className={inputClass()} placeholder="Modal per unit" />
-                <label className="flex items-center justify-center gap-2 rounded-lg border border-[#ded2bf] bg-white text-sm"><input type="radio" checked={productDraft.selectedTierId === tier.id} onChange={() => setEditingProduct({ ...productDraft, selectedTierId: tier.id })} /> Pakai</label>
-                <div className="flex flex-wrap items-center gap-1">
-                  <button type="button" className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Edit</button>
-                  <button type="button" onClick={() => setEditingProduct({ ...productDraft, buyingTiers: [...productDraft.buyingTiers, { ...tier, id: generateId("tier") }] })} className="rounded-md border border-[#ded2bf] bg-white px-2 py-1 text-xs font-semibold text-[#0d4b3a]">Copy</button>
-                  <button type="button" onClick={() => window.confirm("Hapus tier ini?") && setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.filter((item) => item.id !== tier.id) })} className="rounded-md border border-[#e1aaa0] bg-white px-2 py-1 text-xs font-semibold text-[#a33a2d]">Hapus</button>
-                </div>
+            <div className="overflow-x-auto rounded-lg border border-[#eadfce] bg-white">
+              <div className="hidden min-w-[640px] grid-cols-[120px_minmax(0,1fr)_90px_150px] gap-2 border-b border-[#eadfce] bg-[#f7efdf] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[#0d4b3a] md:grid">
+                <span>Qty</span><span>Modal/unit</span><span>Pakai</span><span>Aksi</span>
               </div>
-            ))}
+              {productDraft.buyingTiers.map((tier) => (
+                <div key={tier.id} className="grid min-w-[640px] grid-cols-1 gap-2 border-b border-[#f0e6d6] p-3 last:border-b-0 md:grid-cols-[120px_minmax(0,1fr)_90px_150px] md:items-center md:py-2.5">
+                  <input type="number" value={tier.quantity} onChange={(event) => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.map((item) => item.id === tier.id ? { ...item, quantity: Number(event.target.value) } : item) })} className={inputClass("md:min-h-10")} placeholder="Jumlah beli" />
+                  <input type="number" value={tier.unitCost} onChange={(event) => setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.map((item) => item.id === tier.id ? { ...item, unitCost: Number(event.target.value) } : item) })} className={inputClass("md:min-h-10")} placeholder="Modal per unit" />
+                  <label className="flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[#ded2bf] bg-white text-sm"><input type="radio" checked={productDraft.selectedTierId === tier.id} onChange={() => setEditingProduct({ ...productDraft, selectedTierId: tier.id })} /> Pakai</label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <CompactAction>Edit</CompactAction>
+                    <CompactAction onClick={() => setEditingProduct({ ...productDraft, buyingTiers: [...productDraft.buyingTiers, { ...tier, id: generateId("tier") }] })}>Copy</CompactAction>
+                    <CompactAction tone="danger" onClick={() => window.confirm("Hapus tier ini?") && setEditingProduct({ ...productDraft, buyingTiers: productDraft.buyingTiers.filter((item) => item.id !== tier.id) })}>Hapus</CompactAction>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="grid min-w-0 gap-4 md:grid-cols-4">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Field label="Harga Normal / Non-VIP" type="number" value={productDraft.normalPrice} onChange={(value) => setEditingProduct({ ...productDraft, normalPrice: Number(value) })} />
             <Field label="Harga VIP" type="number" value={productDraft.vipPrice} onChange={(value) => setEditingProduct({ ...productDraft, vipPrice: Number(value) })} />
             <Field label="Harga Promo" type="number" value={productDraft.promoPrice} onChange={(value) => setEditingProduct({ ...productDraft, promoPrice: Number(value) })} />
@@ -3104,9 +3200,9 @@ function ProductPage({ data, persist, editingProduct, setEditingProduct, addCate
       </Card>
 
       <div className="grid min-w-0 gap-6">
-        <Card>
-          <h3 className="text-lg font-semibold text-[#0d4b3a]">Simulasi Produk</h3>
-          <div className="mt-4 grid gap-4">
+        <Card className="p-4">
+          <h3 className="text-base font-semibold text-[#0d4b3a]">Simulasi Produk</h3>
+          <div className="mt-3 grid gap-3">
             <div className="grid gap-3 md:grid-cols-2">
               <SelectField label="Tier harga" value={productMode} onChange={(value) => setProductMode(value as PriceMode)}>
                 {["Normal", "VIP", "Promo", "Manual"].map((mode) => <option key={mode}>{mode}</option>)}
@@ -3115,7 +3211,7 @@ function ProductPage({ data, persist, editingProduct, setEditingProduct, addCate
               <Field label="Quantity sold" type="number" value={quantitySold} onChange={(value) => setQuantitySold(Math.max(Number(value), 1))} />
               <StatCard label="Modal tier dipakai" value={`Buy ${selectedTier(productDraft)?.quantity ?? 1}: ${rupiah(productLive.unitCost)}`} />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               <StatCard label="Total sales" value={rupiah(productSellingPrice * quantitySold)} />
               <StatCard label="Total modal" value={rupiah(productLive.unitCost * quantitySold)} />
               <StatCard label="Total komisi" value={rupiah(productLive.totalCommission * quantitySold)} tone="gold" />
@@ -3227,10 +3323,13 @@ function CommissionSimulationPage({ data, persist }: { data: StorageSchema; pers
     persist({ ...data, commissionDrafts: [...previewRows, ...(data.commissionDrafts ?? [])] });
   };
   return (
-    <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)]">
-      <Card>
-        <h3 className="text-lg font-semibold text-[#0d4b3a]">Manual Transaction Entry</h3>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+    <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(390px,0.8fr)]">
+      <Card className="p-4">
+        <div>
+          <h3 className="text-base font-semibold text-[#0d4b3a]">Manual Transaction Entry</h3>
+          <p className="mt-1 text-xs text-[#756b5d]">Isi transaksi singkat untuk menghitung komisi dan profit.</p>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
           <Field label="Transaction Date" type="date" value={transactionDate} onChange={setTransactionDate} />
           <Field label="Invoice Number" value={invoiceNumber} onChange={setInvoiceNumber} />
           <Field label="Patient Name optional" value={patientName} onChange={setPatientName} />
@@ -3240,14 +3339,14 @@ function CommissionSimulationPage({ data, persist }: { data: StorageSchema; pers
           <Field label="Normal Price" type="number" value={normalPrice} onChange={() => undefined} />
           <Field label="Final Allocated Amount" type="number" value={allocated} onChange={(value) => setFinalAllocatedAmount(Number(value))} />
         </div>
-        <div className="mt-4"><StaffHandlerSection staff={data.staffDirectory ?? []} handlers={handlers} setHandlers={setHandlers} /></div>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-3"><StaffHandlerSection staff={data.staffDirectory ?? []} handlers={handlers} setHandlers={setHandlers} /></div>
+        <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#eadfce] pt-3">
           <ActionButton onClick={() => undefined}>Hitung Preview Komisi</ActionButton>
           <ActionButton variant="secondary" onClick={saveDraft}>Simpan Draft</ActionButton>
         </div>
       </Card>
-      <div className="grid min-w-0 gap-6">
-        <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-4">
+        <div className="grid gap-2 sm:grid-cols-2">
           <StatCard label="Total normal value" value={rupiah(normalPrice)} />
           <StatCard label="Total patient paid" value={rupiah(allocated)} />
           <StatCard label="HPP from treatment master" value={rupiah(result?.totalCost ?? 0)} />
@@ -3256,7 +3355,7 @@ function CommissionSimulationPage({ data, persist }: { data: StorageSchema; pers
           <StatCard label="Estimated net profit" value={rupiah(allocated - (result?.totalCost ?? 0) - totalCommission)} tone={allocated - (result?.totalCost ?? 0) - totalCommission < 0 ? "rose" : "emerald"} />
         </div>
         {stockWarnings.length > 0 && <Card><h3 className="text-sm font-semibold text-[#0d4b3a]">Estimasi pemakaian stock</h3><div className="mt-2 grid gap-1 text-sm text-[#756b5d]">{stockWarnings.map((item, index) => <p key={`${item}-${index}`}>{item}</p>)}</div></Card>}
-        <Card><h3 className="mb-3 text-lg font-semibold text-[#0d4b3a]">Preview Komisi</h3><CommissionDraftPreview rows={previewRows} /></Card>
+        <CommissionDraftPreview rows={previewRows} />
       </div>
     </div>
   );
